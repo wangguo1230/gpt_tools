@@ -14,8 +14,16 @@ from .schemas import (
     LinkGenerateResponse,
     OrderDetailResponse,
     OrderListResponse,
+    SubscriptionStatusRequest,
+    SubscriptionStatusResponse,
+    TokenProfileResponse,
 )
-from .services.checkout import generate_checkout_link, resolve_billing_currency
+from .services.checkout import (
+    generate_checkout_link,
+    get_me_and_subscription,
+    get_subscription_status,
+    resolve_billing_currency,
+)
 from .services.orders import get_order_detail, list_orders
 
 
@@ -62,6 +70,24 @@ async def api_resolve_currency(payload: BillingCurrencyResolveRequest) -> Billin
     try:
         result = await run_in_threadpool(resolve_billing_currency, payload)
         return BillingCurrencyResolveResponse(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/subscription/status", response_model=SubscriptionStatusResponse)
+async def api_subscription_status(payload: SubscriptionStatusRequest) -> SubscriptionStatusResponse:
+    try:
+        result = await run_in_threadpool(get_subscription_status, payload)
+        return SubscriptionStatusResponse(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/token/profile", response_model=TokenProfileResponse)
+async def api_token_profile(payload: SubscriptionStatusRequest) -> TokenProfileResponse:
+    try:
+        result = await run_in_threadpool(get_me_and_subscription, payload)
+        return TokenProfileResponse(**result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

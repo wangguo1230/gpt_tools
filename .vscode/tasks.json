@@ -1,0 +1,96 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "uv: sync backend",
+      "type": "shell",
+      "command": "uv",
+      "args": [
+        "sync",
+        "--project",
+        "${workspaceFolder}/backend"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "npm: install frontend",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "install"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/frontend"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev: backend (uv)",
+      "type": "shell",
+      "command": "uv",
+      "args": [
+        "run",
+        "--project",
+        "${workspaceFolder}/backend",
+        "python",
+        "run.py"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
+      "isBackground": true,
+      "problemMatcher": [
+        {
+          "pattern": {
+            "regexp": "."
+          },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": ".",
+            "endsPattern": "Uvicorn running on"
+          }
+        }
+      ],
+      "dependsOn": [
+        "uv: sync backend"
+      ]
+    },
+    {
+      "label": "dev: frontend",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "dev"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/frontend"
+      },
+      "isBackground": true,
+      "problemMatcher": [
+        {
+          "pattern": {
+            "regexp": "."
+          },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": ".",
+            "endsPattern": "Local:"
+          }
+        }
+      ],
+      "dependsOn": [
+        "npm: install frontend"
+      ]
+    },
+    {
+      "label": "dev: all",
+      "dependsOrder": "parallel",
+      "dependsOn": [
+        "dev: backend (uv)",
+        "dev: frontend"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

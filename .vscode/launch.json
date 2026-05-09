@@ -1,0 +1,26 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "GPT Tools: 启动后端 (uv)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "cd \"${workspaceFolder}/backend\"; uv run --project \"${workspaceFolder}/backend\" python run.py"
+    },
+    {
+      "name": "GPT Tools: 启动前端 (vite)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "cd \"${workspaceFolder}/frontend\"; npm run dev"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "GPT Tools: 一键启动前后端",
+      "configurations": [
+        "GPT Tools: 启动后端 (uv)",
+        "GPT Tools: 启动前端 (vite)"
+      ]
+    }
+  ]
+}

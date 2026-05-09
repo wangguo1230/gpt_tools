@@ -3,10 +3,16 @@ from __future__ import annotations
 from hashlib import sha256
 from typing import Any
 
-from ..schemas import BillingCurrencyResolveRequest, LinkGenerateRequest
+from ..schemas import (
+    BillingCurrencyResolveRequest,
+    LinkGenerateRequest,
+    SubscriptionStatusRequest,
+)
 from .checkout_client import (
     create_checkout_from_token,
     extract_account_hint_from_input,
+    query_me_and_subscription_from_token,
+    query_subscription_status_from_token,
     resolve_checkout_billing_details,
 )
 from .orders import add_log, create_order, mark_failed, mark_success
@@ -115,3 +121,26 @@ def resolve_billing_currency(payload: BillingCurrencyResolveRequest) -> dict[str
         "source": str(result.get("source", "") or ""),
         "error": "",
     }
+
+
+def get_subscription_status(payload: SubscriptionStatusRequest) -> dict[str, Any]:
+    token_input = str(payload.token or "").strip()
+    if not token_input:
+        raise ValueError("请先输入 token")
+    result = query_subscription_status_from_token(
+        token_input=token_input,
+        proxy=str(payload.proxy or "").strip(),
+    )
+    if not result.get("ok"):
+        raise ValueError(str(result.get("error") or "订阅状态查询失败"))
+    return result
+
+
+def get_me_and_subscription(payload: SubscriptionStatusRequest) -> dict[str, Any]:
+    token_input = str(payload.token or "").strip()
+    if not token_input:
+        raise ValueError("请先输入 token")
+    return query_me_and_subscription_from_token(
+        token_input=token_input,
+        proxy=str(payload.proxy or "").strip(),
+    )

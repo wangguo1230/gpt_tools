@@ -31,6 +31,13 @@ export async function generateLink(data) {
   });
 }
 
+export async function querySubscriptionStatus(data) {
+  return request("/api/subscription/status", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
 export async function resolveBillingCurrency(data) {
   return request("/api/regions/resolve-currency", {
     method: "POST",

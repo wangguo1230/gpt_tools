@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -51,6 +52,44 @@ class BillingCurrencyResolveResponse(BaseModel):
     billing_currency: str = ""
     source: str = ""
     error: str = ""
+
+
+class SubscriptionStatusRequest(BaseModel):
+    token: str = Field(min_length=1, description="Access token、Bearer 或 Session JSON")
+    proxy: str | None = None
+
+
+class SubscriptionStatusResponse(BaseModel):
+    ok: bool
+    account_id: str = ""
+    email: str = ""
+    plan_type: str = "unknown"
+    has_active_subscription: bool = False
+    is_delinquent: bool = False
+    is_paid: bool = False
+    billing_period: str = ""
+    subscription_start_at: str = ""
+    subscription_start_source: str = ""
+    expires_at: str = ""
+    renews_at: str = ""
+    cancels_at: str = ""
+    billing_currency: str = ""
+    purchase_origin_platform: str = ""
+    channel_guess: str = ""
+    channel_confidence: str = ""
+    customer_portal_url: str = ""
+    accounts_total: int = 0
+    source: str = ""
+    error: str = ""
+
+
+class TokenProfileResponse(BaseModel):
+    ok: bool
+    source: str = ""
+    error: str = ""
+    me: dict[str, Any] = Field(default_factory=dict)
+    accounts_check: dict[str, Any] = Field(default_factory=dict)
+    customer_portal: dict[str, Any] = Field(default_factory=dict)
 
 
 class OrderSummary(BaseModel):

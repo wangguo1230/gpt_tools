@@ -1,0 +1,18 @@
+[project]
+name = "gpt-tools-backend"
+version = "0.1.0"
+description = "Standalone backend for GPT Tools"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn>=0.30.0",
+  "sqlalchemy>=2.0.0",
+  "curl-cffi>=0.13.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = false
