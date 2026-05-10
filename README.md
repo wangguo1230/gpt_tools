@@ -189,6 +189,7 @@ curl -X POST "http://127.0.0.1:18777/api/links/generate" \
 BACKEND_IMAGE=ghcr.io/wangguo1230/gpt_tools/gpt-tools-backend:latest
 FRONTEND_IMAGE=ghcr.io/wangguo1230/gpt_tools/gpt-tools-frontend:latest
 FRONTEND_PORT=8080
+NGINX_PORT=80
 BACKEND_PORT=18777
 GPT_TOOLS_CORS_ORIGINS=http://localhost:8080
 GPT_TOOLS_DATABASE_URL=sqlite:////app/data/gpt_tools.db

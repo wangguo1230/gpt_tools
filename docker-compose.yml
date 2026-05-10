@@ -16,10 +16,12 @@ services:
   frontend:
     image: ${FRONTEND_IMAGE:-ghcr.io/wangguo1230/gpt_tools/gpt-tools-frontend:latest}
     restart: unless-stopped
+    environment:
+      NGINX_PORT: ${NGINX_PORT:-80}
     depends_on:
       - backend
     ports:
-      - "${FRONTEND_PORT:-8080}:80"
+      - "${FRONTEND_PORT:-8080}:${NGINX_PORT:-80}"
 
 volumes:
   gpt_tools_data:
