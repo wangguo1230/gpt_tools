@@ -339,6 +339,24 @@ function applyPlanModeRestrictions(form) {
       teamSeatInput.value = String(normalizeTeamSeatQuantity(teamSeatInput.value));
     }
   }
+
+  const proxyEnabledInput = qs("#proxy-enabled");
+  const previousPlan = String(planSelect.dataset.prevPlan || "").trim().toLowerCase();
+  const wasTeam48 = previousPlan === "team48";
+  if (proxyEnabledInput) {
+    if (isTeam48) {
+      const shouldShowTip = !proxyEnabledInput.checked || !wasTeam48;
+      proxyEnabledInput.checked = true;
+      syncProxyVisibility();
+      if (shouldShowTip) {
+        setNotice("Team48 月套餐必须使用与优惠码同地区的 IP 才能生成，请确认代理地区。", "neutral");
+      }
+    } else if (wasTeam48) {
+      proxyEnabledInput.checked = false;
+      syncProxyVisibility();
+    }
+  }
+  planSelect.dataset.prevPlan = selectedPlan;
 }
 
 function populateRegionOptions() {
@@ -1135,7 +1153,7 @@ function mount() {
           </form>
           <datalist id="billing-country-options"></datalist>
           <datalist id="billing-currency-options"></datalist>
-          <article class="result-box result-box-plain" id="link-result"></article>
+          <article class="result-box result-box-plain link-result" id="link-result"></article>
         </section>
 
       </section>

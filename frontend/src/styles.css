@@ -822,6 +822,10 @@ button.ghost {
   gap: 8px;
 }
 
+.link-result {
+  margin-top: 12px;
+}
+
 .result-row {
   display: grid;
   grid-template-columns: 190px 1fr;
