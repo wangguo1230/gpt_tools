@@ -55,6 +55,41 @@ function setButtonLoading(button, loading, textWhileLoading) {
   }
 }
 
+async function copyTextToClipboard(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    throw new Error("没有可复制的内容");
+  }
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "readonly");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+  if (!copied) {
+    throw new Error("复制失败，请手动复制");
+  }
+}
+
+function flashCopyButton(button, text = "已复制") {
+  if (!button) return;
+  const original = button.dataset.originalText || button.textContent || "复制";
+  button.dataset.originalText = original;
+  button.textContent = text;
+  button.disabled = true;
+  window.setTimeout(() => {
+    button.textContent = original;
+    button.disabled = false;
+  }, 1200);
+}
+
 function switchService(next) {
   state.activeService = next;
   qsAll("[data-service-btn]").forEach((btn) => {
@@ -713,28 +748,40 @@ function renderLinkResult(payload) {
   }
   const mode = normalizeLinkModeValue(payload.link_mode || "");
   const linkText = linkModeLabel(mode);
+  const checkoutUrl = String(payload.checkout_url || "").trim();
   const rows = [
-    ["订单号", payload.order_no || payload.order_id],
-    ["套餐", payload.selected_plan],
-    ["链接类型", linkText],
-    ["支付链接", payload.checkout_url],
-    ["地区", payload.billing_country],
-    ["货币", payload.billing_currency],
-    ["session_id", payload.checkout_session_id],
+    { key: "订单号", value: payload.order_no || payload.order_id },
+    { key: "套餐", value: payload.selected_plan },
+    { key: "链接类型", value: linkText },
+    {
+      key: "支付链接",
+      isHtml: true,
+      value: checkoutUrl
+        ? `
+          <div class="copy-inline">
+            <span class="copy-value">${escapeHtml(checkoutUrl)}</span>
+            <button type="button" class="copy-btn" data-copy-text="${escapeHtml(checkoutUrl)}">复制</button>
+          </div>
+        `
+        : "-",
+    },
+    { key: "地区", value: payload.billing_country },
+    { key: "货币", value: payload.billing_currency },
+    { key: "session_id", value: payload.checkout_session_id },
   ];
   if (normalizePlanValue(payload.selected_plan) === "team48") {
-    rows.push(["Team 优惠码", payload.team_promo_code || "-"]);
-    rows.push(["Team 席位数", payload.team_seat_quantity || "-"]);
+    rows.push({ key: "Team 优惠码", value: payload.team_promo_code || "-" });
+    rows.push({ key: "Team 席位数", value: payload.team_seat_quantity || "-" });
   }
-  if (payload.error) rows.push(["提示", payload.error]);
+  if (payload.error) rows.push({ key: "提示", value: payload.error });
   box.innerHTML = `
     <div class="result-grid">
       ${rows
         .map(
-          ([k, v]) => `
+          (row) => `
         <div class="result-row">
-          <div class="result-key">${escapeHtml(k)}</div>
-          <div class="result-value">${escapeHtml(v || "-")}</div>
+          <div class="result-key">${escapeHtml(row.key)}</div>
+          <div class="result-value">${row.isHtml ? row.value : escapeHtml(row.value || "-")}</div>
         </div>
       `,
         )
@@ -1111,6 +1158,22 @@ function mount() {
   qs("#query-billing-btn").addEventListener("click", async () => {
     const button = qs("#query-billing-btn");
     await queryBillingHistoryWithInput({ button });
+  });
+  qs("#link-result").addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-copy-text]");
+    if (!button) return;
+    const text = String(button.getAttribute("data-copy-text") || "").trim();
+    if (!text) {
+      setNotice("没有可复制的链接", "danger");
+      return;
+    }
+    try {
+      await copyTextToClipboard(text);
+      flashCopyButton(button, "已复制");
+      setNotice("支付链接已复制", "success");
+    } catch (error) {
+      setNotice(error.message || "复制失败，请手动复制", "danger");
+    }
   });
   qs("#billing-result").addEventListener("click", async (event) => {
     const button = event.target.closest("button[data-file-type][data-index]");

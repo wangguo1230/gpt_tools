@@ -843,6 +843,36 @@ button.ghost {
   font-size: 13px;
 }
 
+.copy-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.copy-value {
+  min-width: 0;
+  flex: 1;
+  word-break: break-all;
+}
+
+.copy-btn {
+  flex-shrink: 0;
+  border: 1px solid rgba(92, 112, 231, 0.28);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #4c63da;
+  background: #eef2ff;
+  box-shadow: none;
+}
+
+.copy-btn:hover {
+  filter: none;
+  background: #e4eaff;
+}
+
 @media (max-width: 980px) {
   .topbar {
     flex-direction: column;
