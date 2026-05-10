@@ -75,10 +75,17 @@ function switchService(next) {
 }
 
 function getAuthContext() {
+  const proxyEnabled = Boolean(qs("#proxy-enabled")?.checked);
   return {
     token: String(qs("#token-input")?.value || "").trim(),
-    proxy: String(qs("#proxy-input")?.value || "").trim(),
+    proxy: proxyEnabled ? String(qs("#proxy-input")?.value || "").trim() : "",
   };
+}
+
+function syncProxyVisibility() {
+  const enabled = Boolean(qs("#proxy-enabled")?.checked);
+  const proxyWrap = qs("#proxy-config");
+  if (proxyWrap) proxyWrap.hidden = !enabled;
 }
 
 const CHANNEL_LABEL_MAP = {
@@ -1012,8 +1019,15 @@ function mount() {
         <section class="auth-card">
           <label class="auth-label">请输入复制的 Session JSON</label>
           <textarea id="token-input" rows="6" placeholder="粘贴从 /api/auth/session 复制的完整 Session JSON"></textarea>
-          <label class="proxy-row" for="proxy-input">代理 (可选)</label>
-          <input id="proxy-input" type="text" value="http://127.0.0.1:10808" placeholder="http://127.0.0.1:10808" />
+          <label class="proxy-toggle" for="proxy-enabled">
+            <input id="proxy-enabled" type="checkbox" />
+            启用代理
+          </label>
+          <div id="proxy-config" hidden>
+            <label class="proxy-row" for="proxy-input">代理地址 (HTTP)</label>
+            <input id="proxy-input" type="text" placeholder="http://user:pass@127.0.0.1:10808" />
+            <p class="proxy-help">支持 HTTP 代理，支持用户名密码，例如：http://user:pass@host:port</p>
+          </div>
         </section>
 
         <section data-service-panel="subscription" class="service-panel">
@@ -1109,11 +1123,18 @@ function mount() {
   });
 
   const tokenInput = qs("#token-input");
+  const proxyEnabledInput = qs("#proxy-enabled");
   if (tokenInput) {
     tokenInput.addEventListener("input", () => {
       updateAuthDependentActions();
     });
   }
+  if (proxyEnabledInput) {
+    proxyEnabledInput.addEventListener("change", () => {
+      syncProxyVisibility();
+    });
+  }
+  syncProxyVisibility();
   updateAuthDependentActions();
   switchService(state.activeService);
 
