@@ -16,9 +16,9 @@ ALLOWED_PLANS = {"plus", "pro5x", "pro20x", "team48"}
 ALLOWED_LINK_MODES = {"short", "hosted", "long"}
 PLAN_ALLOWED_LINK_MODES: dict[str, set[str]] = {
     "pro5x": {"short"},
-    "pro20x": {"short", "hosted", "long"},
+    "pro20x": {"short", "hosted"},
     "plus": {"short", "hosted", "long"},
-    "team48": {"short", "hosted", "long"},
+    "team48": {"short", "hosted"},
 }
 
 TEAM48_PROMO_CODE = "THINKTECHNOLOGIESUS"

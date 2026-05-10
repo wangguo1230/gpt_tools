@@ -100,9 +100,9 @@ const CHANNEL_LABEL_MAP = {
 
 const PLAN_ALLOWED_LINK_MODES = Object.freeze({
   pro5x: ["short"],
-  pro20x: ["short", "hosted", "long"],
+  pro20x: ["short", "hosted"],
   plus: ["short", "hosted", "long"],
-  team48: ["short", "hosted", "long"],
+  team48: ["short", "hosted"],
 });
 const TEAM48_DEFAULT_PROMO_CODE = "THINKTECHNOLOGIESUS";
 const TEAM48_DEFAULT_SEAT_QUANTITY = 2;

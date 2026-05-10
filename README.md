@@ -9,7 +9,7 @@
    - `short`（ChatGPT 短链）
    - `hosted`（站内长链，pay.openai Hosted）
    - `long`（站外长链，checkout.stripe）
-   - 约束：`Pro5x` 仅支持 `short`，`Pro20x / PLUS / Team 48 个月` 支持三种模式
+   - 约束：`Pro5x` 仅支持 `short`；`Pro20x / Team 48 个月` 仅支持 `short + hosted`；`PLUS` 支持三种模式
    - `Team 48 个月` 默认使用优惠码 `THINKTECHNOLOGIESUS`，并支持前端自定义优惠码与席位数
    - `Team 48 个月` 的地区与货币按前端选择生成，不再强制固定美国/美元
    - `Team 48 个月` 在 `hosted` 模式下采用“短链会话转长链”方式生成（兼容性更好）
