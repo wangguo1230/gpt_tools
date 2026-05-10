@@ -45,19 +45,18 @@ export async function resolveBillingCurrency(data) {
   });
 }
 
-export async function listOrders(params) {
-  const query = new URLSearchParams();
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && `${value}`.trim() !== "") {
-      query.set(key, `${value}`);
-    }
+export async function queryBillingHistory(data) {
+  return request("/api/billing/query", {
+    method: "POST",
+    body: JSON.stringify(data),
   });
-  const suffix = query.toString() ? `?${query.toString()}` : "";
-  return request(`/api/orders${suffix}`);
 }
 
-export async function getOrderDetail(orderId, logLimit = 30) {
-  return request(`/api/orders/${orderId}?log_limit=${logLimit}`);
+export async function resolveBillingInvoiceFile(data) {
+  return request("/api/billing/invoice-file", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 }
 
 export async function checkHealth() {

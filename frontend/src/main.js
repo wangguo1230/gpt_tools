@@ -2,24 +2,19 @@ import "./styles.css";
 import {
   checkHealth,
   generateLink,
-  getOrderDetail,
-  listOrders,
+  queryBillingHistory,
+  resolveBillingInvoiceFile,
   querySubscriptionStatus,
   resolveBillingCurrency,
 } from "./api";
-import { currencyForCountry } from "./countryCurrency";
+import { countryCurrencyOptions, currencyForCountry } from "./countryCurrency";
 
 const state = {
   activeService: "subscription",
   latestSubscription: null,
+  latestBilling: null,
+  billingFileLoadingKey: "",
   latestTokenInput: "",
-  orderQuery: {
-    keyword: "",
-    status: "",
-    plan_type: "",
-    limit: 20,
-    offset: 0,
-  },
 };
 
 function qs(selector) {
@@ -66,7 +61,16 @@ function switchService(next) {
     btn.classList.toggle("active", btn.dataset.serviceBtn === next);
   });
   qsAll("[data-service-panel]").forEach((panel) => {
-    panel.hidden = panel.dataset.servicePanel !== next;
+    const isActive = panel.dataset.servicePanel === next;
+    if (!isActive) {
+      panel.hidden = true;
+      panel.classList.remove("panel-enter");
+      return;
+    }
+    panel.hidden = false;
+    panel.classList.remove("panel-enter");
+    void panel.offsetWidth;
+    panel.classList.add("panel-enter");
   });
 }
 
@@ -86,6 +90,251 @@ const CHANNEL_LABEL_MAP = {
   paid_unknown: "渠道未知",
   unknown: "未知",
 };
+
+const PLAN_ALLOWED_LINK_MODES = Object.freeze({
+  pro5x: ["short"],
+  pro20x: ["short", "hosted", "long"],
+  plus: ["short", "hosted", "long"],
+  team48: ["short", "hosted", "long"],
+});
+const TEAM48_DEFAULT_PROMO_CODE = "THINKTECHNOLOGIESUS";
+const TEAM48_DEFAULT_SEAT_QUANTITY = 2;
+
+const LINK_MODE_LABEL_MAP = Object.freeze({
+  short: "ChatGPT 短链",
+  hosted: "站内长链",
+  long: "站外长链",
+});
+
+const countryDisplayNames = typeof Intl !== "undefined" && Intl.DisplayNames
+  ? new Intl.DisplayNames(["zh-CN"], { type: "region" })
+  : null;
+const currencyDisplayNames = typeof Intl !== "undefined" && Intl.DisplayNames
+  ? new Intl.DisplayNames(["zh-CN"], { type: "currency" })
+  : null;
+const checkoutCountries = countryCurrencyOptions.map((item) => ({ code: item.code, currency: item.currency }));
+const checkoutCountryByCode = new Map(checkoutCountries.map((item) => [item.code, item]));
+const checkoutCurrencies = Array.from(
+  new Set(checkoutCountries.map((item) => item.currency).filter(Boolean)),
+).sort();
+
+function safeDisplayName(displayNames, code) {
+  if (!displayNames || !code) return code || "";
+  try {
+    return displayNames.of(code) || code;
+  } catch {
+    return code;
+  }
+}
+
+function normalizeSearchText(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function parseLeadingCode(value, pattern) {
+  const normalized = normalizeSearchText(value);
+  const match = normalized.match(pattern);
+  return match ? match[1] : normalized;
+}
+
+function countryName(code) {
+  return safeDisplayName(countryDisplayNames, code);
+}
+
+function currencyName(code) {
+  return safeDisplayName(currencyDisplayNames, code);
+}
+
+function formatCountryOption(option) {
+  if (!option) return "";
+  const parts = [option.code, countryName(option.code)];
+  if (option.currency) parts.push(option.currency);
+  return parts.join(" - ");
+}
+
+function formatCurrencyOption(currency) {
+  if (!currency) return "";
+  return `${currency} - ${currencyName(currency)}`;
+}
+
+function resolveCountryOption(value) {
+  const normalized = normalizeSearchText(value);
+  if (!normalized) return null;
+
+  const leadingCode = parseLeadingCode(value, /^([A-Z0-9]{2,3})(?:\b|\s|-|\/)/);
+  if (checkoutCountryByCode.has(leadingCode)) return checkoutCountryByCode.get(leadingCode);
+  if (normalized.length < 2) return null;
+
+  return checkoutCountries.find((option) => {
+    const label = normalizeSearchText(formatCountryOption(option));
+    return label === normalized || label.includes(normalized);
+  }) || null;
+}
+
+function normalizeCountryCode(value) {
+  const option = resolveCountryOption(value);
+  if (option) return option.code;
+  return normalizeSearchText(value);
+}
+
+function normalizeCurrencyValue(value) {
+  const normalized = normalizeSearchText(value);
+  if (!normalized) return "";
+
+  const leadingCode = parseLeadingCode(value, /^([A-Z]{3})(?:\b|\s|-|\/)/);
+  if (checkoutCurrencies.includes(leadingCode)) return leadingCode;
+  if (normalized.length < 2) return normalized;
+
+  const matched = checkoutCurrencies.find((currency) => {
+    const label = normalizeSearchText(formatCurrencyOption(currency));
+    return label === normalized || label.includes(normalized);
+  });
+  return matched || normalized;
+}
+
+function normalizeBillingCurrencyForCountry(country, currency) {
+  if (country === "AR" && currency === "ARS") return "USD";
+  return currency;
+}
+
+function normalizeTeamSeatQuantity(value) {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  if (!Number.isFinite(parsed)) return TEAM48_DEFAULT_SEAT_QUANTITY;
+  if (parsed < 1) return 1;
+  if (parsed > 999) return 999;
+  return parsed;
+}
+
+function normalizePlanValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(PLAN_ALLOWED_LINK_MODES, normalized) ? normalized : "pro5x";
+}
+
+function planLabelFromPlanType(planType) {
+  const normalized = String(planType || "").trim().toLowerCase();
+  if (!normalized || normalized === "unknown") return "";
+  if (normalized === "free") return "FREE";
+  if (normalized === "plus") return "PLUS";
+  if (normalized === "team") return "TEAM";
+  if (normalized === "pro" || normalized === "prolite") return "PRO";
+  return normalized.toUpperCase();
+}
+
+function planLabelFromSubscriptionPlan(subscriptionPlan) {
+  const normalized = String(subscriptionPlan || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized.includes("team")) return "TEAM";
+  if (normalized.includes("plus")) return "PLUS";
+  if (normalized.includes("pro")) return "PRO";
+  if (normalized.includes("go")) return "GO";
+  if (normalized.includes("free")) return "FREE";
+  return normalized.toUpperCase();
+}
+
+function hasSubscriptionHistory(payload) {
+  if (!payload || typeof payload !== "object") return false;
+  return Boolean(
+    String(payload.subscription_start_at || "").trim()
+      || String(payload.expires_at || "").trim()
+      || String(payload.renews_at || "").trim()
+      || String(payload.cancels_at || "").trim(),
+  );
+}
+
+function normalizeLinkModeValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(LINK_MODE_LABEL_MAP, normalized) ? normalized : "short";
+}
+
+function linkModeLabel(mode) {
+  return LINK_MODE_LABEL_MAP[normalizeLinkModeValue(mode)] || "支付链接";
+}
+
+function applyPlanModeRestrictions(form) {
+  if (!form) return;
+  const planSelect = form.querySelector("[name='plan']");
+  const modeSelect = form.querySelector("[name='link_mode']");
+  if (!planSelect || !modeSelect) return;
+
+  const selectedPlan = normalizePlanValue(planSelect.value);
+  const allowedModes = PLAN_ALLOWED_LINK_MODES[selectedPlan] || ["short"];
+  const allowedSet = new Set(allowedModes);
+  for (const option of modeSelect.options) {
+    option.disabled = !allowedSet.has(option.value);
+  }
+
+  const currentMode = normalizeLinkModeValue(modeSelect.value);
+  if (!allowedSet.has(currentMode)) {
+    modeSelect.value = allowedModes[0];
+  }
+
+  const countryInput = form.querySelector("[name='billing_country']");
+  const teamPromoInput = form.querySelector("[name='team_promo_code']");
+  const teamSeatInput = form.querySelector("[name='team_seat_quantity']");
+  const isTeam48 = selectedPlan === "team48";
+
+  if (countryInput) {
+    countryInput.disabled = false;
+    countryInput.title = "";
+  }
+
+  if (teamPromoInput) {
+    const teamPromoLabel = teamPromoInput.closest("label");
+    if (teamPromoLabel) teamPromoLabel.hidden = !isTeam48;
+    teamPromoInput.disabled = !isTeam48;
+    teamPromoInput.required = isTeam48;
+    if (isTeam48 && !String(teamPromoInput.value || "").trim()) {
+      teamPromoInput.value = TEAM48_DEFAULT_PROMO_CODE;
+    }
+  }
+
+  if (teamSeatInput) {
+    const teamSeatLabel = teamSeatInput.closest("label");
+    if (teamSeatLabel) teamSeatLabel.hidden = !isTeam48;
+    teamSeatInput.disabled = !isTeam48;
+    teamSeatInput.required = isTeam48;
+    if (isTeam48) {
+      teamSeatInput.value = String(normalizeTeamSeatQuantity(teamSeatInput.value));
+    }
+  }
+}
+
+function populateRegionOptions() {
+  const countryList = qs("#billing-country-options");
+  const currencyList = qs("#billing-currency-options");
+  if (countryList) {
+    countryList.innerHTML = checkoutCountries
+      .map((option) => `<option value="${escapeHtml(formatCountryOption(option))}"></option>`)
+      .join("");
+  }
+  if (currencyList) {
+    currencyList.innerHTML = checkoutCurrencies
+      .map((currency) => `<option value="${escapeHtml(formatCurrencyOption(currency))}"></option>`)
+      .join("");
+  }
+}
+
+function normalizeBillingCountryInput(input) {
+  if (!input) return "";
+  const option = resolveCountryOption(input.value);
+  if (!option) {
+    input.value = normalizeCountryCode(input.value);
+    return normalizeCountryCode(input.value);
+  }
+  input.value = formatCountryOption(option);
+  return option.code;
+}
+
+function normalizeBillingCurrencyInput(input) {
+  if (!input) return "";
+  const currency = normalizeCurrencyValue(input.value);
+  if (!currency) {
+    input.value = "";
+    return "";
+  }
+  input.value = formatCurrencyOption(currency);
+  return currency;
+}
 
 function getChannelLabel(payload) {
   const guess = String(payload.channel_guess || "").trim().toLowerCase();
@@ -230,13 +479,87 @@ function extractEmailFromTokenInput(rawTokenInput) {
   return extractEmailFromJwt(candidate);
 }
 
+function renderSubscriptionLoading() {
+  const box = qs("#subscription-result");
+  if (!box) return;
+  box.innerHTML = `
+    <div class="skeleton-stack">
+      <div class="skeleton-line w-40"></div>
+      <div class="skeleton-line w-26"></div>
+    </div>
+    <div class="skeleton-grid">
+      ${Array.from({ length: 8 }).map(() => '<div class="skeleton-card"></div>').join("")}
+    </div>
+    <div class="skeleton-line w-100"></div>
+  `;
+}
+
+function renderBillingLoading() {
+  const box = qs("#billing-result");
+  if (!box) return;
+  box.innerHTML = `
+    <div class="skeleton-stack">
+      <div class="skeleton-line w-30"></div>
+    </div>
+    <div class="billing-table-wrap">
+      <table class="billing-table">
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>金额</th>
+            <th>状态</th>
+            <th>描述</th>
+            <th>卡信息</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${Array.from({ length: 4 })
+            .map(
+              () => `
+            <tr>
+              <td><span class="skeleton-line w-60"></span></td>
+              <td><span class="skeleton-line w-40"></span></td>
+              <td><span class="skeleton-line w-50"></span></td>
+              <td><span class="skeleton-line w-70"></span></td>
+              <td><span class="skeleton-line w-65"></span></td>
+              <td><span class="skeleton-line w-55"></span></td>
+            </tr>
+          `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderLinkLoading() {
+  const box = qs("#link-result");
+  if (!box) return;
+  box.innerHTML = `
+    <div class="result-grid">
+      ${Array.from({ length: 7 })
+        .map(
+          () => `
+        <div class="result-row">
+          <div class="result-key"><span class="skeleton-line w-50"></span></div>
+          <div class="result-value"><span class="skeleton-line w-80"></span></div>
+        </div>
+      `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderSubscriptionResult(payload) {
   const box = qs("#subscription-result");
   if (!box) return;
   if (!payload) {
-    box.innerHTML = '<p class="placeholder">等待查询订阅状态...</p>';
+    box.innerHTML = "";
     state.latestSubscription = null;
-    updateSubscriptionActions();
+    updateAuthDependentActions();
     return;
   }
   state.latestSubscription = payload;
@@ -245,7 +568,7 @@ function renderSubscriptionResult(payload) {
   const alertTitle = hasError ? "查询失败，请检查 token 是否有效" : "查询成功，已获取订阅信息";
   const alertDesc = hasError
     ? payload.error || "无法加载账号订阅信息，请稍后重试。"
-    : "可继续生成支付方式，或切换到订单查询查看记录。";
+    : "可继续生成支付方式。";
   const autoRenew = payload.has_active_subscription ? "已开启" : "未开启";
   const accountState = hasError ? "异常" : payload.is_delinquent ? "欠费风险" : "正常";
   const channelSummary = getChannelLabel(payload);
@@ -272,10 +595,32 @@ function renderSubscriptionResult(payload) {
   const emailFromToken = extractEmailFromTokenInput(state.latestTokenInput);
   const accountEmail = String(payload.email || emailFromToken || "-").trim() || "-";
   const planType = String(payload.plan_type || "-").trim();
+  const latestSubscriptionPlan = String(payload.latest_subscription_plan || "").trim();
+  const activeSubscription = Boolean(payload.has_active_subscription);
+  const hasPreviouslyPaid = Boolean(payload.has_previously_paid_subscription);
+  const recentPlanLabel = planLabelFromSubscriptionPlan(latestSubscriptionPlan);
+  const currentPlanLabel = planLabelFromPlanType(planType) || "FREE";
+  const hasHistorySubscription = Boolean(
+    recentPlanLabel
+      || hasSubscriptionHistory(payload)
+      || hasPreviouslyPaid,
+  );
+  let historyPlanLabel = "";
+  let historyPlanHint = "";
+  if (!activeSubscription) {
+    historyPlanLabel = recentPlanLabel || (hasHistorySubscription ? "历史订阅" : "暂无历史订阅");
+    if (latestSubscriptionPlan) {
+      historyPlanHint = `来源：${latestSubscriptionPlan}`;
+    } else if (hasHistorySubscription) {
+      historyPlanHint = "来源：无明确套餐字段，按历史订阅线索展示";
+    }
+  }
+  const startTimeTileKey = activeSubscription ? "订阅时间" : "最近订阅时间(推断)";
+  const endTimeTileKey = activeSubscription ? "订阅结束时间" : "最近订阅结束时间";
   const tiles = [
     {
       key: "当前套餐",
-      value: `<span class="plan-chip">${escapeHtml(planType.toLowerCase() || "-")}</span>`,
+      value: `<span class="plan-chip">${escapeHtml(currentPlanLabel || "-")}</span>`,
       isHtml: true,
       toneClass: "tile-plan",
     },
@@ -292,17 +637,26 @@ function renderSubscriptionResult(payload) {
       valueClass: "emphasis",
     },
     {
-      key: "订阅结束时间",
+      key: endTimeTileKey,
       value: endsAt,
       toneClass: `tile-end ${endTileToneClass}`,
       valueClass: "emphasis end-time",
     },
-    { key: "订阅时间", value: startedAt, toneClass: "tile-neutral" },
+    { key: startTimeTileKey, value: startedAt, toneClass: "tile-neutral" },
     { key: "自动续费", value: autoRenew, toneClass: payload.has_active_subscription ? "tile-active" : "tile-neutral" },
     { key: "计费周期", value: cycle, toneClass: "tile-neutral" },
     { key: "货币单位", value: payload.billing_currency || "-", toneClass: "tile-neutral" },
     { key: "账号状态", value: accountState, toneClass: accountState === "正常" ? "tile-active" : "tile-risk" },
   ];
+  if (!activeSubscription) {
+    tiles.splice(1, 0, {
+      key: "最近一次历史套餐",
+      value: `<span class="plan-chip">${escapeHtml(historyPlanLabel || "-")}</span>`,
+      isHtml: true,
+      toneClass: "tile-plan",
+      hint: historyPlanHint,
+    });
+  }
   box.innerHTML = `
     <div class="subscription-hero">
       <div>
@@ -310,7 +664,7 @@ function renderSubscriptionResult(payload) {
         <h3>${escapeHtml(paid ? "订阅中" : "未订阅")}</h3>
         <p class="hero-email">账号邮箱：${escapeHtml(accountEmail)}</p>
       </div>
-      <span class="badge ${paid ? "ok" : "warn"}">${escapeHtml((planType || "unknown").toUpperCase())}</span>
+      <span class="badge ${paid ? "ok" : "warn"}">${escapeHtml(currentPlanLabel || "UNKNOWN")}</span>
     </div>
     <div class="alert-row ${hasError ? "error" : "success"}">
       <div class="alert-title">${escapeHtml(alertTitle)}</div>
@@ -332,42 +686,39 @@ function renderSubscriptionResult(payload) {
     <div class="remain-bar ${escapeHtml(remainBarToneClass)}">${escapeHtml(remainInfo.text)}</div>
     ${payload.error && !hasError ? `<p class="warn-text">提示：${escapeHtml(payload.error)}</p>` : ""}
   `;
-  updateSubscriptionActions();
+  updateAuthDependentActions();
 }
 
-function updateSubscriptionActions() {
-  const portalButton = qs("#open-portal-btn");
-  if (!portalButton) return;
-  const url = String(state.latestSubscription?.customer_portal_url || "").trim();
-  if (url) {
-    portalButton.disabled = false;
-    portalButton.dataset.url = url;
-    portalButton.textContent = "获取历史账单链接";
-    return;
-  }
-  portalButton.disabled = true;
-  portalButton.dataset.url = "";
-  portalButton.textContent = "历史账单链接不可用";
+function updateAuthDependentActions() {
+  const { token } = getAuthContext();
+  const disabled = !token;
+  qsAll("[data-requires-token]").forEach((button) => {
+    button.disabled = disabled;
+  });
 }
 
 function renderLinkResult(payload) {
   const box = qs("#link-result");
   if (!box) return;
   if (!payload) {
-    box.innerHTML = '<p class="placeholder">等待生成支付方式...</p>';
+    box.innerHTML = "";
     return;
   }
-  const methods = payload.payment_methods || {};
+  const mode = normalizeLinkModeValue(payload.link_mode || "");
+  const linkText = linkModeLabel(mode);
   const rows = [
     ["订单号", payload.order_no || payload.order_id],
     ["套餐", payload.selected_plan],
-    ["short", methods.short],
-    ["hosted", methods.hosted],
-    ["stripe", methods.stripe],
+    ["链接类型", linkText],
+    ["支付链接", payload.checkout_url],
     ["地区", payload.billing_country],
     ["货币", payload.billing_currency],
     ["session_id", payload.checkout_session_id],
   ];
+  if (normalizePlanValue(payload.selected_plan) === "team48") {
+    rows.push(["Team 优惠码", payload.team_promo_code || "-"]);
+    rows.push(["Team 席位数", payload.team_seat_quantity || "-"]);
+  }
   if (payload.error) rows.push(["提示", payload.error]);
   box.innerHTML = `
     <div class="result-grid">
@@ -385,93 +736,193 @@ function renderLinkResult(payload) {
   `;
 }
 
-function renderOrderRows(payload) {
-  const tbody = qs("#orders-tbody");
-  const summary = qs("#orders-summary");
-  const items = Array.isArray(payload?.items) ? payload.items : [];
-  if (summary) summary.textContent = `共 ${payload?.total ?? 0} 条，当前 ${items.length} 条`;
-
-  if (!tbody) return;
-  if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="placeholder">暂无数据</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = items
-    .map(
-      (item) => `
-      <tr data-order-id="${item.id}">
-        <td>#${item.id}</td>
-        <td>${escapeHtml(item.task_no)}</td>
-        <td><span class="pill">${escapeHtml(item.plan_type)}</span></td>
-        <td>${escapeHtml(item.status)}</td>
-        <td>${escapeHtml(item.account_email || "-")}</td>
-        <td>${escapeHtml(item.created_at || "-")}</td>
-      </tr>
-    `,
-    )
-    .join("");
+function billingFileKey(invoice, index, fileType) {
+  return `${fileType}:${index}:${String(invoice?.id || invoice?.slug || "").trim()}`;
 }
 
-function renderOrderDetail(payload) {
-  const box = qs("#order-detail");
+function renderBillingResult(payload) {
+  const box = qs("#billing-result");
   if (!box) return;
-  if (!payload?.item) {
-    box.innerHTML = '<p class="placeholder">点击列表行查看订单详情</p>';
+  if (!payload) {
+    box.innerHTML = "";
+    state.latestBilling = null;
+    state.billingFileLoadingKey = "";
     return;
   }
-  const item = payload.item;
-  const logs = Array.isArray(payload.logs) ? payload.logs : [];
-  box.innerHTML = `
-    <div class="order-meta">
-      <div><b>订单</b> #${item.id} / ${escapeHtml(item.task_no)}</div>
-      <div><b>套餐</b> ${escapeHtml(item.plan_type)} | <b>状态</b> ${escapeHtml(item.status)}</div>
-      <div><b>短链</b> <span class="mono">${escapeHtml(item.short_url || "-")}</span></div>
-      <div><b>支付链</b> <span class="mono">${escapeHtml(item.checkout_url || "-")}</span></div>
-      <div><b>错误</b> ${escapeHtml(item.last_error_code || "-")} ${escapeHtml(item.last_error_message || "")}</div>
-    </div>
-    <div class="log-list">
-      ${
-        logs.length
-          ? logs
-              .map(
-                (log) => `
-            <div class="log-item">
-              <div class="log-head">
-                <span class="level">${escapeHtml(log.level)}</span>
-                <span>${escapeHtml(log.step)}</span>
-                <span>${escapeHtml(log.created_at)}</span>
-              </div>
-              <div class="log-msg">${escapeHtml(log.message)}</div>
+
+  state.latestBilling = payload;
+  const invoices = Array.isArray(payload.invoices) ? payload.invoices : [];
+  const notice = String(payload.notice || "").trim();
+  const hasError = !Boolean(payload.ok);
+  const summary = `${invoices.length} 条账单记录`;
+
+  if (!invoices.length) {
+    box.innerHTML = `
+      <div class="billing-head">
+        <h4>历史账单查询</h4>
+        <span>${escapeHtml(summary)}</span>
+      </div>
+      <p class="placeholder">${escapeHtml(notice || (hasError ? "账单查询失败" : "暂无账单记录"))}</p>
+      ${hasError && payload.error ? `<p class="warn-text">错误：${escapeHtml(payload.error)}</p>` : ""}
+    `;
+    return;
+  }
+
+  const rowsHtml = invoices
+    .map((invoice, index) => {
+      const slug = String(invoice.slug || "").trim();
+      const hosted = String(invoice.hosted_invoice_url || "").trim();
+      const invoiceUrl = String(invoice.invoice_pdf_url || "").trim();
+      const receiptUrl = String(invoice.receipt_pdf_url || "").trim();
+      const invoiceLoading = state.billingFileLoadingKey === billingFileKey(invoice, index, "invoice");
+      const receiptLoading = state.billingFileLoadingKey === billingFileKey(invoice, index, "receipt");
+
+      const invoiceAction = invoiceUrl
+        ? `<a class="billing-link" href="${escapeHtml(invoiceUrl)}" target="_blank" rel="noopener noreferrer">打开发票</a>`
+        : `<button type="button" class="billing-btn" data-file-type="invoice" data-index="${index}" ${slug ? "" : "disabled"}>${invoiceLoading ? "获取中..." : "获取发票"}</button>`;
+
+      const receiptAction = receiptUrl
+        ? `<a class="billing-link" href="${escapeHtml(receiptUrl)}" target="_blank" rel="noopener noreferrer">打开收据</a>`
+        : `<button type="button" class="billing-btn" data-file-type="receipt" data-index="${index}" ${slug ? "" : "disabled"}>${receiptLoading ? "获取中..." : "获取收据"}</button>`;
+
+      const hostedAction = hosted
+        ? `<a class="billing-link muted" href="${escapeHtml(hosted)}" target="_blank" rel="noopener noreferrer">账单详情</a>`
+        : '<span class="billing-muted">-</span>';
+
+      return `
+        <tr>
+          <td>${escapeHtml(invoice.date || "-")}</td>
+          <td>${escapeHtml(invoice.amount || "-")}</td>
+          <td>${escapeHtml(invoice.status || "-")}</td>
+          <td>${escapeHtml(invoice.description || "-")}</td>
+          <td>${escapeHtml(invoice.card || "-")}</td>
+          <td>
+            <div class="billing-actions-cell">
+              ${invoiceAction}
+              ${receiptAction}
+              ${hostedAction}
             </div>
-          `,
-              )
-              .join("")
-          : '<p class="placeholder">暂无日志</p>'
-      }
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  box.innerHTML = `
+    <div class="billing-head">
+      <h4>历史账单查询</h4>
+      <span>${escapeHtml(summary)}</span>
     </div>
+    <div class="billing-table-wrap">
+      <table class="billing-table">
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>金额</th>
+            <th>状态</th>
+            <th>描述</th>
+            <th>卡信息</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+    ${notice ? `<p class="billing-notice">${escapeHtml(notice)}</p>` : ""}
   `;
 }
+
+async function queryBillingHistoryWithInput({ button = null } = {}) {
+  const { token, proxy } = getAuthContext();
+  if (!token) {
+    setNotice("请先输入 token", "danger");
+    return null;
+  }
+  if (button) setButtonLoading(button, true, "查询中...");
+  renderBillingLoading();
+  try {
+    const payload = await queryBillingHistory({ token, proxy });
+    renderBillingResult(payload);
+    setNotice("历史账单查询成功", "success");
+    return payload;
+  } catch (error) {
+    renderBillingResult({
+      ok: false,
+      invoices: [],
+      notice: error.message || "历史账单查询失败",
+      error: error.message || "历史账单查询失败",
+    });
+    setNotice(error.message || "历史账单查询失败", "danger");
+    return null;
+  } finally {
+    if (button) setButtonLoading(button, false);
+    updateAuthDependentActions();
+  }
+}
+
+async function prepareInvoiceFile(index, fileType) {
+  const invoices = Array.isArray(state.latestBilling?.invoices) ? state.latestBilling.invoices : [];
+  const invoice = invoices[index];
+  if (!invoice) return;
+  const slug = String(invoice.slug || "").trim();
+  if (!slug) {
+    setNotice(fileType === "receipt" ? "该账单没有收据标识" : "该账单没有发票标识", "danger");
+    return;
+  }
+  const key = billingFileKey(invoice, index, fileType);
+  state.billingFileLoadingKey = key;
+  renderBillingResult(state.latestBilling);
+  try {
+    const { proxy } = getAuthContext();
+    const payload = await resolveBillingInvoiceFile({
+      slug,
+      file_type: fileType,
+      proxy,
+    });
+    const resolvedUrl = String(payload.url || "").trim();
+    if (!resolvedUrl) {
+      throw new Error("未获取到可用文件链接");
+    }
+    if (fileType === "receipt") {
+      invoice.receipt_pdf_url = resolvedUrl;
+    } else {
+      invoice.invoice_pdf_url = resolvedUrl;
+    }
+    renderBillingResult(state.latestBilling);
+    setNotice(fileType === "receipt" ? "收据链接已准备好" : "发票链接已准备好", "success");
+  } catch (error) {
+    renderBillingResult(state.latestBilling);
+    setNotice(error.message || "账单文件链接获取失败", "danger");
+  } finally {
+    state.billingFileLoadingKey = "";
+    renderBillingResult(state.latestBilling);
+  }
+}
+
 
 async function autoResolveCurrency(form, { silent = false } = {}) {
   const auth = getAuthContext();
   const countryInput = form.querySelector("[name='billing_country']");
   const currencyInput = form.querySelector("[name='billing_currency']");
-  const country = String(countryInput?.value || "").trim().toUpperCase();
-  const currency = String(currencyInput?.value || "").trim().toUpperCase();
+
+  const country = normalizeBillingCountryInput(countryInput);
+  const currency = normalizeCurrencyValue(String(currencyInput?.value || ""));
   if (!country) return null;
 
-  const localCurrency = String(currencyForCountry(country) || "").trim().toUpperCase();
-  if (localCurrency) {
-    if (countryInput) countryInput.value = country;
-    if (currencyInput) currencyInput.value = localCurrency;
-    if (!silent && localCurrency !== currency) {
-      setNotice(`已自动匹配货币：${country} -> ${localCurrency}`, "success");
+  const mappedCurrency = String(currencyForCountry(country) || "").trim().toUpperCase();
+  const localCurrency = normalizeBillingCurrencyForCountry(country, mappedCurrency);
+  if (localCurrency || currency) {
+    const resolvedCurrency = localCurrency || normalizeBillingCurrencyForCountry(country, currency);
+    if (currencyInput) currencyInput.value = resolvedCurrency ? formatCurrencyOption(resolvedCurrency) : "";
+    if (!silent && resolvedCurrency !== currency) {
+      setNotice(`已自动匹配货币：${country} -> ${resolvedCurrency}`, "success");
     }
     return {
       ok: true,
       billing_country: country,
-      billing_currency: localCurrency,
+      billing_currency: resolvedCurrency,
       source: "worker_country_map",
     };
   }
@@ -487,36 +938,39 @@ async function autoResolveCurrency(form, { silent = false } = {}) {
     billing_country: country,
     billing_currency: currency,
   });
-  if (countryInput) countryInput.value = String(payload.billing_country || "").toUpperCase();
-  if (currencyInput) currencyInput.value = String(payload.billing_currency || "").toUpperCase();
+  if (countryInput) normalizeBillingCountryInput(countryInput);
+  if (currencyInput) {
+    const resolvedCurrency = normalizeBillingCurrencyForCountry(
+      String(payload.billing_country || "").trim().toUpperCase(),
+      String(payload.billing_currency || "").trim().toUpperCase(),
+    );
+    currencyInput.value = resolvedCurrency ? formatCurrencyOption(resolvedCurrency) : "";
+  }
   if (!silent) setNotice(`已自动匹配货币：${payload.billing_country} -> ${payload.billing_currency}`, "success");
   return payload;
 }
 
-async function loadOrders() {
-  const btn = qs("#search-orders-btn");
-  setButtonLoading(btn, true, "查询中...");
-  try {
-    const payload = await listOrders(state.orderQuery);
-    renderOrderRows(payload);
-    setNotice("订单查询成功", "success");
-  } catch (error) {
-    renderOrderRows({ items: [], total: 0 });
-    setNotice(error.message || "订单查询失败", "danger");
-  } finally {
-    setButtonLoading(btn, false);
+async function querySubscriptionWithInput({ button = null, loadingText = "查询中...", successNotice = "订阅状态查询成功" } = {}) {
+  const { token, proxy } = getAuthContext();
+  if (!token) {
+    setNotice("请先输入 token", "danger");
+    return null;
   }
-}
-
-async function loadOrderDetail(orderId) {
-  const detailBox = qs("#order-detail");
-  if (detailBox) detailBox.innerHTML = '<p class="placeholder">正在加载详情...</p>';
+  state.latestTokenInput = token;
+  if (button) setButtonLoading(button, true, loadingText);
+  renderSubscriptionLoading();
   try {
-    const payload = await getOrderDetail(orderId, 40);
-    renderOrderDetail(payload);
+    const payload = await querySubscriptionStatus({ token, proxy });
+    renderSubscriptionResult(payload);
+    setNotice(successNotice, "success");
+    return payload;
   } catch (error) {
-    renderOrderDetail(null);
-    setNotice(error.message || "加载订单详情失败", "danger");
+    renderSubscriptionResult({ error: error.message || "订阅状态查询失败" });
+    setNotice(error.message || "订阅状态查询失败", "danger");
+    return null;
+  } finally {
+    if (button) setButtonLoading(button, false);
+    updateAuthDependentActions();
   }
 }
 
@@ -528,7 +982,7 @@ function mount() {
         <div class="brand-logo">🐾</div>
         <div>
           <div class="brand-title">ChatGPT 支付助手</div>
-          <div class="brand-sub">Token管理 · 订阅状态 · 支付方式 · 订单记录</div>
+          <div class="brand-sub">Token管理 · 订阅状态 · 支付方式</div>
         </div>
       </div>
       <div class="notice" id="notice" data-tone="neutral">正在初始化...</div>
@@ -538,123 +992,91 @@ function mount() {
       <section class="workspace-card">
         <div class="workspace-head">
           <h2>数据中心</h2>
-          <p>单页三功能：先查订阅，再生成支付方式，最后查订单。</p>
+          <p>三个功能页签：订阅查询、历史账单查询、生成支付链接。Token 与代理保持不变，仅下方内容切换。</p>
         </div>
 
         <nav class="service-tabs">
-          <button data-service-btn="subscription" class="active">GPT Token 查询</button>
-          <button data-service-btn="payment">平台自助服务</button>
-          <button data-service-btn="orders">订单查询服务</button>
+          <button data-service-btn="subscription" class="active">订阅查询</button>
+          <button data-service-btn="billing">历史账单查询</button>
+          <button data-service-btn="payment">生成支付链接</button>
         </nav>
 
         <section class="hint-card">
           <h3>如何获取 Token 数据？</h3>
           <ul>
-            <li><b>方式1：</b>访问 <code>https://chatgpt.com/api/auth/session</code>，复制页面 JSON。</li>
-            <li><b>方式2：</b>直接粘贴 <code>Bearer ...</code> 或 access token。</li>
-            <li><b>方式3：</b>也支持包含 <code>access_token / accessToken / token</code> 字段的 JSON。</li>
+            <li><b>第一步：</b>先登录 <a href="https://chatgpt.com" target="_blank" rel="noopener noreferrer">https://chatgpt.com</a></li>
+            <li><b>第二步：</b>访问 <a href="https://chatgpt.com/api/auth/session" target="_blank" rel="noopener noreferrer">https://chatgpt.com/api/auth/session</a>，复制页面 JSON。</li>
           </ul>
         </section>
 
         <section class="auth-card">
-          <label class="auth-label">请输入 Token JSON 数据、Refresh Token 或 Access Token</label>
-          <textarea id="token-input" rows="6" placeholder="粘贴完整 Token JSON / Bearer token / JWT"></textarea>
-          <div class="auth-controls">
-            <input id="proxy-input" type="text" value="http://127.0.0.1:10808" placeholder="Proxy (可选): http://127.0.0.1:10808" />
-            <button id="query-subscription-btn" type="button">校验Token并查询订阅</button>
-            <button id="clear-token-btn" type="button" class="ghost">清空内容</button>
-          </div>
+          <label class="auth-label">请输入复制的 Session JSON</label>
+          <textarea id="token-input" rows="6" placeholder="粘贴从 /api/auth/session 复制的完整 Session JSON"></textarea>
+          <label class="proxy-row" for="proxy-input">代理 (可选)</label>
+          <input id="proxy-input" type="text" value="http://127.0.0.1:10808" placeholder="http://127.0.0.1:10808" />
         </section>
 
         <section data-service-panel="subscription" class="service-panel">
-          <article class="result-box" id="subscription-result">
-            <p class="placeholder">等待查询订阅状态...</p>
-          </article>
-          <div class="account-actions">
-            <button type="button" class="soft blue" id="open-payment-tab-btn">获取订阅支付链接</button>
-            <button type="button" class="soft green" id="open-orders-tab-btn">查看订单查询服务</button>
-            <button type="button" class="soft purple" id="open-portal-btn" disabled>历史账单链接不可用</button>
+          <div class="service-panel-head service-panel-head-center">
+            <button type="button" id="query-subscription-btn" data-requires-token>查询订阅</button>
           </div>
+          <article class="result-box result-box-plain" id="subscription-result"></article>
+        </section>
+
+        <section data-service-panel="billing" class="service-panel" hidden>
+          <div class="service-panel-head service-panel-head-center">
+            <button type="button" id="query-billing-btn" data-requires-token>查询历史账单</button>
+          </div>
+          <article class="result-box result-box-plain billing-result" id="billing-result"></article>
         </section>
 
         <section data-service-panel="payment" class="service-panel" hidden>
+          <div class="service-panel-head">
+            <h3>生成支付链接</h3>
+          </div>
           <form id="link-form" class="form-grid">
             <label>
               套餐
               <select name="plan">
-                <option value="pro">Pro</option>
-                <option value="plus">Plus</option>
+                <option value="pro5x">Pro5x</option>
+                <option value="pro20x">Pro20x</option>
+                <option value="plus">PLUS</option>
+                <option value="team48">Team 48 个月</option>
               </select>
             </label>
             <label>
               默认返回链接
               <select name="link_mode">
-                <option value="short">short</option>
-                <option value="hosted">hosted</option>
-                <option value="long">long</option>
+                <option value="short">ChatGPT 短链</option>
+                <option value="hosted">站内长链</option>
+                <option value="long">站外长链</option>
               </select>
             </label>
             <label>
               地区 (Country)
-              <input type="text" name="billing_country" maxlength="8" placeholder="例如 US" />
+              <input type="text" name="billing_country" maxlength="64" list="billing-country-options" placeholder="支持搜索，例如 US / 美国 / 菲律宾" />
             </label>
             <label>
               货币 (Currency)
-              <input type="text" name="billing_currency" maxlength="8" placeholder="自动识别，例如 USD" />
+              <input type="text" name="billing_currency" maxlength="32" list="billing-currency-options" placeholder="自动带出，可搜索或手动改" />
+            </label>
+            <label hidden>
+              Team 优惠码
+              <input type="text" name="team_promo_code" maxlength="128" placeholder="例如 THINKTECHNOLOGIESUS" />
+            </label>
+            <label hidden>
+              Team 席位数
+              <input type="number" name="team_seat_quantity" min="1" max="999" step="1" value="2" />
             </label>
             <div class="form-actions">
-              <button id="generate-link-btn" type="submit">生成支付方式</button>
+              <button id="generate-link-btn" type="submit" data-requires-token>生成支付方式</button>
             </div>
           </form>
-          <article class="result-box" id="link-result">
-            <p class="placeholder">等待生成支付方式...</p>
-          </article>
+          <datalist id="billing-country-options"></datalist>
+          <datalist id="billing-currency-options"></datalist>
+          <article class="result-box result-box-plain" id="link-result"></article>
         </section>
 
-        <section data-service-panel="orders" class="service-panel" hidden>
-          <form id="order-query-form" class="query-grid">
-            <input name="keyword" placeholder="关键词：task_no / 邮箱 / 链接" />
-            <select name="status">
-              <option value="">全部状态</option>
-              <option value="processing">processing</option>
-              <option value="generated">generated</option>
-              <option value="failed">failed</option>
-            </select>
-            <select name="plan_type">
-              <option value="">全部套餐</option>
-              <option value="pro">pro</option>
-              <option value="plus">plus</option>
-              <option value="pro5x">pro5x(兼容历史)</option>
-              <option value="pro20x">pro20x(兼容历史)</option>
-            </select>
-            <input name="limit" type="number" min="1" max="100" value="20" />
-            <button id="search-orders-btn" type="submit">查询订单</button>
-          </form>
-
-          <div id="orders-summary" class="summary">共 0 条，当前 0 条</div>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Task No</th>
-                  <th>套餐</th>
-                  <th>状态</th>
-                  <th>账号邮箱</th>
-                  <th>创建时间</th>
-                </tr>
-              </thead>
-              <tbody id="orders-tbody">
-                <tr><td colspan="6" class="placeholder">暂无数据</td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          <article class="result-box" id="order-detail">
-            <p class="placeholder">点击列表行查看订单详情</p>
-          </article>
-        </section>
       </section>
     </main>
   `;
@@ -663,55 +1085,52 @@ function mount() {
     button.addEventListener("click", () => switchService(button.dataset.serviceBtn));
   });
 
-  qs("#clear-token-btn").addEventListener("click", () => {
-    qs("#token-input").value = "";
-    state.latestTokenInput = "";
-    renderSubscriptionResult(null);
-    setNotice("已清空 Token 输入", "neutral");
-  });
-
   qs("#query-subscription-btn").addEventListener("click", async () => {
-    const { token, proxy } = getAuthContext();
-    if (!token) {
-      setNotice("请先输入 token", "danger");
-      return;
-    }
-    state.latestTokenInput = token;
     const button = qs("#query-subscription-btn");
-    setButtonLoading(button, true, "查询中...");
-    renderSubscriptionResult(null);
-    try {
-      const payload = await querySubscriptionStatus({ token, proxy });
-      renderSubscriptionResult(payload);
-      switchService("subscription");
-      setNotice("订阅状态查询成功", "success");
-    } catch (error) {
-      renderSubscriptionResult({ error: error.message || "订阅状态查询失败" });
-      setNotice(error.message || "订阅状态查询失败", "danger");
-    } finally {
-      setButtonLoading(button, false);
-    }
+    await querySubscriptionWithInput({
+      button,
+      loadingText: "查询中...",
+      successNotice: "订阅状态查询成功",
+    });
   });
 
-  qs("#open-payment-tab-btn").addEventListener("click", () => {
-    switchService("payment");
-    setNotice("已切换到支付方式生成", "neutral");
+  qs("#query-billing-btn").addEventListener("click", async () => {
+    const button = qs("#query-billing-btn");
+    await queryBillingHistoryWithInput({ button });
   });
-  qs("#open-orders-tab-btn").addEventListener("click", () => {
-    switchService("orders");
-    setNotice("已切换到订单查询", "neutral");
+  qs("#billing-result").addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-file-type][data-index]");
+    if (!button) return;
+    const fileType = String(button.dataset.fileType || "").trim().toLowerCase();
+    const index = Number.parseInt(String(button.dataset.index || ""), 10);
+    if (!Number.isInteger(index) || index < 0) return;
+    if (fileType !== "invoice" && fileType !== "receipt") return;
+    await prepareInvoiceFile(index, fileType);
   });
-  qs("#open-portal-btn").addEventListener("click", () => {
-    const url = String(qs("#open-portal-btn").dataset.url || "").trim();
-    if (!url) {
-      setNotice("当前账号未返回账单门户链接", "danger");
-      return;
-    }
-    window.open(url, "_blank", "noopener,noreferrer");
-  });
+
+  const tokenInput = qs("#token-input");
+  if (tokenInput) {
+    tokenInput.addEventListener("input", () => {
+      updateAuthDependentActions();
+    });
+  }
+  updateAuthDependentActions();
+  switchService(state.activeService);
 
   const linkForm = qs("#link-form");
+  populateRegionOptions();
+  applyPlanModeRestrictions(linkForm);
+
+  const planInput = linkForm.querySelector("[name='plan']");
+  planInput.addEventListener("change", () => {
+    applyPlanModeRestrictions(linkForm);
+  });
+
   const countryInput = linkForm.querySelector("[name='billing_country']");
+  const currencyInput = linkForm.querySelector("[name='billing_currency']");
+  const teamPromoInput = linkForm.querySelector("[name='team_promo_code']");
+  const teamSeatInput = linkForm.querySelector("[name='team_seat_quantity']");
+
   countryInput.addEventListener("change", async () => {
     try {
       await autoResolveCurrency(linkForm, { silent: false });
@@ -719,31 +1138,64 @@ function mount() {
       setNotice(error.message || "自动识别货币失败", "danger");
     }
   });
+  countryInput.addEventListener("blur", () => {
+    normalizeBillingCountryInput(countryInput);
+  });
+  currencyInput.addEventListener("blur", () => {
+    normalizeBillingCurrencyInput(currencyInput);
+  });
 
   linkForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const auth = getAuthContext();
     if (!auth.token) {
-      setNotice("请先在上方填写 token 并校验订阅状态", "danger");
+      setNotice("请先在上方填写 token", "danger");
       return;
     }
 
     const submitButton = qs("#generate-link-btn");
     const form = new FormData(event.currentTarget);
+    const plan = normalizePlanValue(String(form.get("plan") || "pro5x"));
+    const modeRaw = normalizeLinkModeValue(String(form.get("link_mode") || "short"));
+    const allowedModes = PLAN_ALLOWED_LINK_MODES[plan] || ["short"];
+    const linkMode = allowedModes.includes(modeRaw) ? modeRaw : allowedModes[0];
+    let billingCountry = normalizeCountryCode(String(form.get("billing_country") || ""));
+    let billingCurrency = normalizeBillingCurrencyForCountry(
+      billingCountry,
+      normalizeCurrencyValue(String(form.get("billing_currency") || "")),
+    );
     const payload = {
       token: auth.token,
       proxy: auth.proxy,
-      plan: String(form.get("plan") || "pro").trim().toLowerCase(),
-      link_mode: String(form.get("link_mode") || "short").trim(),
-      billing_country: String(form.get("billing_country") || "").trim().toUpperCase(),
-      billing_currency: String(form.get("billing_currency") || "").trim().toUpperCase(),
+      plan,
+      link_mode: linkMode,
+      billing_country: billingCountry,
+      billing_currency: billingCurrency,
     };
+    if (plan === "team48") {
+      const promoCode = String(form.get("team_promo_code") || "").trim() || TEAM48_DEFAULT_PROMO_CODE;
+      const seatQuantity = normalizeTeamSeatQuantity(form.get("team_seat_quantity"));
+      payload.team_promo_code = promoCode;
+      payload.team_seat_quantity = seatQuantity;
+      if (teamPromoInput) teamPromoInput.value = promoCode;
+      if (teamSeatInput) teamSeatInput.value = String(seatQuantity);
+    }
+
+    applyPlanModeRestrictions(linkForm);
+    if (countryInput && payload.billing_country) {
+      const matched = checkoutCountryByCode.get(payload.billing_country);
+      countryInput.value = matched ? formatCountryOption(matched) : payload.billing_country;
+    }
+    if (currencyInput) {
+      currencyInput.value = payload.billing_currency ? formatCurrencyOption(payload.billing_currency) : "";
+    }
+
     if (payload.billing_country && !payload.billing_currency) {
       try {
         const resolved = await autoResolveCurrency(linkForm, { silent: true });
         if (resolved?.billing_currency) {
           payload.billing_currency = String(resolved.billing_currency || "").trim().toUpperCase();
-          linkForm.querySelector("[name='billing_currency']").value = payload.billing_currency;
+          if (currencyInput) currencyInput.value = formatCurrencyOption(payload.billing_currency);
         }
       } catch {
         // keep user input
@@ -751,37 +1203,20 @@ function mount() {
     }
 
     setButtonLoading(submitButton, true, "生成中...");
-    renderLinkResult(null);
+    renderLinkLoading();
     try {
       const result = await generateLink(payload);
       renderLinkResult(result);
-      setNotice("支付方式生成成功", "success");
+      setNotice(`支付方式生成成功：${linkModeLabel(result.link_mode || payload.link_mode)}`, "success");
     } catch (error) {
       renderLinkResult({ error: error.message || "支付方式生成失败" });
       setNotice(error.message || "支付方式生成失败", "danger");
     } finally {
       setButtonLoading(submitButton, false);
+      updateAuthDependentActions();
     }
   });
 
-  qs("#order-query-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    state.orderQuery.keyword = String(form.get("keyword") || "").trim();
-    state.orderQuery.status = String(form.get("status") || "").trim();
-    state.orderQuery.plan_type = String(form.get("plan_type") || "").trim();
-    state.orderQuery.limit = Number(form.get("limit") || 20);
-    state.orderQuery.offset = 0;
-    await loadOrders();
-  });
-
-  qs("#orders-tbody").addEventListener("click", async (event) => {
-    const row = event.target.closest("tr[data-order-id]");
-    if (!row) return;
-    qsAll("#orders-tbody tr").forEach((tr) => tr.classList.remove("active-row"));
-    row.classList.add("active-row");
-    await loadOrderDetail(Number(row.dataset.orderId));
-  });
 }
 
 async function bootstrap() {
@@ -792,7 +1227,6 @@ async function bootstrap() {
   } catch (error) {
     setNotice(`后端连接失败: ${error.message || "unknown"}`, "danger");
   }
-  await loadOrders();
 }
 
 bootstrap();

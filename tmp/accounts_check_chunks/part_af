@@ -1,0 +1,194 @@
+            "default_offer_id": "chatgptpro"
+          }
+        },
+        "default": {
+          "account": {
+            "account_user_role": "account-owner",
+            "account_user_id": "user-9lU2lQi9kDcpF667VzuguIPv__1d008bbd-6591-427b-a5a4-1635bf97a955",
+            "account_owner_id": "user-9lU2lQi9kDcpF667VzuguIPv",
+            "account_residency_region": "no_constraint",
+            "account_compute_residency": "no_constraint",
+            "account_compute_residency_display_name": "No Constraint",
+            "account_compute_residency_description": "No inference residency constraints",
+            "processor": {
+              "a001": {
+                "has_customer_object": true,
+                "processor_entity": "openai_llc"
+              },
+              "b001": {
+                "has_transaction_history": false
+              },
+              "c001": {
+                "has_transaction_history": true
+              }
+            },
+            "account_id": "1d008bbd-6591-427b-a5a4-1635bf97a955",
+            "organization_id": null,
+            "is_most_recent_expired_subscription_gratis": false,
+            "has_previously_paid_subscription": true,
+            "name": null,
+            "profile_picture_id": null,
+            "profile_picture_url": null,
+            "structure": "personal",
+            "workspace_type": null,
+            "plan_type": "prolite",
+            "is_deactivated": false,
+            "eligible_for_reactivation": true,
+            "promo_data": {},
+            "user_segmentation_info": null,
+            "reseller_hosted_account": false,
+            "reseller_id": null,
+            "ekm_config": null,
+            "is_hipaa_compliant_workspace": false,
+            "hipaa_workspace_baa_metadata": null,
+            "is_finserv_enabled_workspace": false,
+            "is_fedramp_compliant_workspace": false,
+            "is_conversation_classifier_enabled_for_workspace": true,
+            "started_as_free_workspace": false,
+            "disable_account_switching": true,
+            "enable_account_switching": false
+          },
+          "features": [
+            "aura_available",
+            "beta_features",
+            "bizmo_settings",
+            "breeze_available",
+            "browsing_available",
+            "canvas",
+            "canvas_code_execution",
+            "canvas_code_network_access",
+            "canvas_o1",
+            "canvas_opt_in",
+            "caterpillar",
+            "chart_serialization",
+            "chat_preferences_available",
+            "chatgpt_ios_attest",
+            "code_interpreter_available",
+            "d3_controls",
+            "d3_editor",
+            "d3_editor_gpts",
+            "dalle_3",
+            "gizmo_canvas_toggle",
+            "gizmo_reviews",
+            "gizmo_support_emails",
+            "golden_hour",
+            "gpt5",
+            "gpt5_mini",
+            "gpt_4_5",
+            "graphite",
+            "image_gen_tool_enabled",
+            "mfa",
+            "model_ab_use_v2",
+            "model_switcher",
+            "moonshine",
+            "n7jupd",
+            "new_plugin_oauth_endpoint",
+            "no_auth_training_enabled_by_default",
+            "o3",
+            "o4_mini",
+            "plugins_available",
+            "privacy_policy_nov_2023",
+            "search_tool",
+            "sentinel_enabled_for_subscription",
+            "share_multimodal_links",
+            "shareable_links",
+            "snc",
+            "starter_prompts",
+            "sunshine_available",
+            "user_settings_announcements",
+            "video_screen_sharing",
+            "voice_advanced_ga",
+            "voice_file_upload",
+            "voice_mode_tool_enabled",
+            "voice_text_upload",
+            "wham",
+            "workspace_ip_allowlist"
+          ],
+          "entitlement": {
+            "subscription_id": "b0b4e278-3344-4dec-8d51-e0a6453b5b44",
+            "has_active_subscription": true,
+            "is_active_subscription_gratis": false,
+            "subscription_plan": "chatgptprolite",
+            "expires_at": "2026-06-05T10:04:47+00:00",
+            "renews_at": "2026-06-05T04:04:47+00:00",
+            "cancels_at": null,
+            "billing_period": "monthly",
+            "scheduled_plan_change": null,
+            "billing_currency": "EGP",
+            "discount": null,
+            "applied_discounts": [],
+            "trial": null,
+            "is_eligible_for_cp": false,
+            "is_delinquent": false,
+            "became_delinquent_timestamp": null,
+            "grace_period_end_timestamp": null,
+            "grace_period_id": null
+          },
+          "last_active_subscription": {
+            "subscription_id": "b0b4e278-3344-4dec-8d51-e0a6453b5b44",
+            "purchase_origin_platform": "chatgpt_web",
+            "will_renew": true,
+            "cancellation_outcome": null
+          },
+          "is_eligible_for_yearly_plus_subscription": false,
+          "can_access_with_session": true,
+          "sso_connection_name": null,
+          "eligible_promo_campaigns": {},
+          "eligible_offers": {
+            "offers": [
+              {
+                "id": "chatgptfreeplan",
+                "epl_enabled": null,
+                "revenuecat_offering_ids": []
+              },
+              {
+                "id": "chatgptgoplan",
+                "epl_enabled": false,
+                "revenuecat_offering_ids": [
+                  "go"
+                ]
+              },
+              {
+                "id": "chatgptplusplan",
+                "epl_enabled": false,
+                "revenuecat_offering_ids": [
+                  "default"
+                ]
+              },
+              {
+                "id": "chatgptpro",
+                "epl_enabled": false,
+                "revenuecat_offering_ids": [
+                  "pro"
+                ]
+              },
+              {
+                "id": "chatgptteamplan",
+                "epl_enabled": false,
+                "revenuecat_offering_ids": []
+              },
+              {
+                "id": "chatgptfreeworkspaceplan",
+                "epl_enabled": false,
+                "revenuecat_offering_ids": []
+              }
+            ],
+            "default_offer_id": "chatgptpro"
+          }
+        }
+      },
+      "account_ordering": [
+        "1d008bbd-6591-427b-a5a4-1635bf97a955",
+        "0df912bf-dead-4d16-8b66-e435123c902d",
+        "9a435cd5-be48-4951-bdf3-42f14eeb6135",
+        "cc6b4b44-c41c-4e06-bbf5-41c5f9d3400e",
+        "c0e020de-1dd0-49d5-96e3-f93dce48fe6b",
+        "978f33fa-8f85-4a01-99c9-220c49619849",
+        "a4f5d602-4935-4359-b013-13161bcca87d",
+        "a423a20a-511f-4d72-b05b-f7adf055d827",
+        "664acd70-0fe8-4243-8761-0465334b8501",
+        "b8db2696-0ce7-44ce-a68b-ca5a6634527d"
+      ]
+    }
+  }
+}

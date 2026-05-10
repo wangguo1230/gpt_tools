@@ -32,7 +32,7 @@ def create_order(
     with session_scope() as session:
         order = ToolOrderModel(
             task_no=_task_no(),
-            plan_type=str(plan_type or "pro").strip().lower(),
+            plan_type=str(plan_type or "pro5x").strip().lower(),
             link_mode=str(link_mode or "short").strip().lower(),
             status="processing",
             billing_country=str(billing_country or "").strip().upper(),

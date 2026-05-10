@@ -4,10 +4,13 @@ from hashlib import sha256
 from typing import Any
 
 from ..schemas import (
+    BillingInvoiceFileRequest,
     BillingCurrencyResolveRequest,
+    BillingQueryRequest,
     LinkGenerateRequest,
     SubscriptionStatusRequest,
 )
+from .billing_client import query_billing_from_token, resolve_billing_invoice_file_url
 from .checkout_client import (
     create_checkout_from_token,
     extract_account_hint_from_input,
@@ -50,6 +53,8 @@ def generate_checkout_link(payload: LinkGenerateRequest) -> dict[str, Any]:
             "link_mode": payload.link_mode,
             "billing_country": str(payload.billing_country or "").upper(),
             "billing_currency": str(payload.billing_currency or "").upper(),
+            "team_promo_code": str(payload.team_promo_code or "").strip(),
+            "team_seat_quantity": int(payload.team_seat_quantity or 0),
         },
     )
 
@@ -60,6 +65,8 @@ def generate_checkout_link(payload: LinkGenerateRequest) -> dict[str, Any]:
         proxy=str(payload.proxy or "").strip(),
         billing_country=str(payload.billing_country or ""),
         billing_currency=str(payload.billing_currency or ""),
+        team_promo_code=str(payload.team_promo_code or ""),
+        team_seat_quantity=payload.team_seat_quantity,
     )
     if not result.get("ok"):
         error_message = str(result.get("error") or "生成短链失败")
@@ -144,3 +151,32 @@ def get_me_and_subscription(payload: SubscriptionStatusRequest) -> dict[str, Any
         token_input=token_input,
         proxy=str(payload.proxy or "").strip(),
     )
+
+
+def get_billing_history(payload: BillingQueryRequest) -> dict[str, Any]:
+    token_input = str(payload.token or "").strip()
+    if not token_input:
+        raise ValueError("请先输入 token")
+    return query_billing_from_token(
+        token_input=token_input,
+        proxy=str(payload.proxy or "").strip(),
+    )
+
+
+def get_billing_invoice_file(payload: BillingInvoiceFileRequest) -> dict[str, Any]:
+    slug = str(payload.slug or "").strip()
+    if not slug:
+        raise ValueError("请先传入账单标识 slug")
+    file_type = str(payload.file_type or "invoice").strip().lower()
+    url = resolve_billing_invoice_file_url(
+        slug=slug,
+        file_type=file_type,
+        proxy=str(payload.proxy or "").strip(),
+    )
+    return {
+        "ok": True,
+        "slug": slug,
+        "file_type": file_type,
+        "url": url,
+        "error": "",
+    }

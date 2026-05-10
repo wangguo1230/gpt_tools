@@ -8,8 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_database
 from .schemas import (
+    BillingInvoiceFileRequest,
+    BillingInvoiceFileResponse,
     BillingCurrencyResolveRequest,
     BillingCurrencyResolveResponse,
+    BillingQueryRequest,
+    BillingQueryResponse,
     LinkGenerateRequest,
     LinkGenerateResponse,
     OrderDetailResponse,
@@ -20,6 +24,8 @@ from .schemas import (
 )
 from .services.checkout import (
     generate_checkout_link,
+    get_billing_history,
+    get_billing_invoice_file,
     get_me_and_subscription,
     get_subscription_status,
     resolve_billing_currency,
@@ -90,6 +96,30 @@ async def api_token_profile(payload: SubscriptionStatusRequest) -> TokenProfileR
         return TokenProfileResponse(**result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/billing/query", response_model=BillingQueryResponse)
+async def api_billing_query(payload: BillingQueryRequest) -> BillingQueryResponse:
+    try:
+        result = await run_in_threadpool(get_billing_history, payload)
+        return BillingQueryResponse(**result)
+    except Exception as exc:
+        status_code = int(getattr(exc, "status_code", 400) or 400)
+        if status_code < 400 or status_code > 599:
+            status_code = 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@app.post("/api/billing/invoice-file", response_model=BillingInvoiceFileResponse)
+async def api_billing_invoice_file(payload: BillingInvoiceFileRequest) -> BillingInvoiceFileResponse:
+    try:
+        result = await run_in_threadpool(get_billing_invoice_file, payload)
+        return BillingInvoiceFileResponse(**result)
+    except Exception as exc:
+        status_code = int(getattr(exc, "status_code", 400) or 400)
+        if status_code < 400 or status_code > 599:
+            status_code = 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @app.get("/api/orders", response_model=OrderListResponse)

@@ -12,8 +12,21 @@ from curl_cffi import requests as curl_requests
 CHATGPT_API_BASE = "https://chatgpt.com"
 BACKEND_API_BASE = f"{CHATGPT_API_BASE}/backend-api"
 
-ALLOWED_PLANS = {"pro", "plus", "pro5x", "pro20x"}
+ALLOWED_PLANS = {"plus", "pro5x", "pro20x", "team48"}
 ALLOWED_LINK_MODES = {"short", "hosted", "long"}
+PLAN_ALLOWED_LINK_MODES: dict[str, set[str]] = {
+    "pro5x": {"short"},
+    "pro20x": {"short", "hosted", "long"},
+    "plus": {"short", "hosted", "long"},
+    "team48": {"short", "hosted", "long"},
+}
+
+TEAM48_PROMO_CODE = "THINKTECHNOLOGIESUS"
+TEAM48_DEFAULT_WORKSPACE_NAME = "Team 48M Workspace"
+TEAM48_DEFAULT_PRICE_INTERVAL = "month"
+TEAM48_DEFAULT_SEAT_QUANTITY = 2
+TEAM48_MIN_SEAT_QUANTITY = 1
+TEAM48_MAX_SEAT_QUANTITY = 999
 
 STRIPE_KEYS: dict[str, str] = {
     "openai_llc": "pk_live_51HOrSwC6h1nxGoI3lTAgRjYVrz4dU3fVOabyCcKR3pbEJguCVAlqCxdxCUvoRh1XWwRacViovU3kLKvpkjh7IqkW00iXQsjo3n",
@@ -109,12 +122,39 @@ def extract_account_hint_from_input(raw_value: str) -> dict[str, str]:
 
 
 def _normalize_plan(value: Any) -> str:
-    plan = str(value or "pro").strip().lower()
-    if plan in {"pro20x", "pro5x"}:
-        return "pro"
-    if plan in {"pro", "plus"}:
+    plan = str(value or "pro5x").strip().lower()
+    if plan == "pro":
+        return "pro5x"
+    if plan == "team":
+        return "team48"
+    if plan in ALLOWED_PLANS:
         return plan
-    return "pro"
+    return "pro5x"
+
+
+def _normalize_team48_promo_code(value: Any) -> str:
+    promo_code = str(value or "").strip()
+    if not promo_code:
+        return TEAM48_PROMO_CODE
+    return promo_code[:128]
+
+
+def _normalize_team48_seat_quantity(value: Any) -> int:
+    try:
+        quantity = int(value)
+    except Exception:
+        quantity = TEAM48_DEFAULT_SEAT_QUANTITY
+    if quantity < TEAM48_MIN_SEAT_QUANTITY:
+        return TEAM48_MIN_SEAT_QUANTITY
+    if quantity > TEAM48_MAX_SEAT_QUANTITY:
+        return TEAM48_MAX_SEAT_QUANTITY
+    return quantity
+
+
+def _is_link_mode_allowed_for_plan(plan: str, link_mode: str) -> bool:
+    normalized_plan = _normalize_plan(plan)
+    normalized_mode = _normalize_link_mode(link_mode)
+    return normalized_mode in PLAN_ALLOWED_LINK_MODES.get(normalized_plan, {"short"})
 
 
 def _normalize_link_mode(value: Any) -> str:
@@ -541,6 +581,7 @@ def _extract_account_candidates(raw: dict[str, Any]) -> list[dict[str, Any]]:
         plan_type = str(account.get("plan_type", "unknown") or "unknown").strip().lower()
         has_active = bool(entitlement.get("has_active_subscription", False))
         billing_period = _normalize_billing_period(entitlement.get("billing_period"))
+        subscription_plan = str(entitlement.get("subscription_plan", "") or "").strip().lower()
         expires_at = str(entitlement.get("expires_at", "") or "").strip()
         renews_at = str(entitlement.get("renews_at", "") or "").strip()
         cancels_at = str(entitlement.get("cancels_at", "") or "").strip()
@@ -558,8 +599,10 @@ def _extract_account_candidates(raw: dict[str, Any]) -> list[dict[str, Any]]:
                 "account_id": aid,
                 "email": str(account.get("email", "") or account.get("user_email", "") or "").strip(),
                 "plan_type": plan_type,
+                "has_previously_paid_subscription": bool(account.get("has_previously_paid_subscription", False)),
                 "has_active_subscription": has_active,
                 "is_paid": _is_paid_plan(plan_type, has_active),
+                "subscription_plan": subscription_plan,
                 "billing_period": billing_period,
                 "expires_at": expires_at,
                 "renews_at": renews_at,
@@ -727,6 +770,8 @@ def query_subscription_status_from_token(
         "account_id": str(selected.get("account_id", "") or ""),
         "email": str(selected.get("email", "") or ""),
         "plan_type": str(selected.get("plan_type", "unknown") or "unknown"),
+        "latest_subscription_plan": str(selected.get("subscription_plan", "") or ""),
+        "has_previously_paid_subscription": bool(selected.get("has_previously_paid_subscription", False)),
         "has_active_subscription": bool(selected.get("has_active_subscription", False)),
         "is_delinquent": bool(selected.get("is_delinquent", False)),
         "is_paid": bool(selected.get("is_paid", False)),
@@ -855,22 +900,45 @@ def create_checkout_session(
     billing_country: str = "",
     billing_currency: str = "",
     processor_entity: str = "",
+    team_promo_code: str = "",
+    team_seat_quantity: int | None = None,
 ) -> dict[str, Any]:
     normalized_plan = _normalize_plan(plan)
     ui_mode = str(checkout_ui_mode or "custom").strip().lower()
     if ui_mode not in {"custom", "hosted"}:
         ui_mode = "custom"
 
-    if normalized_plan == "plus":
-        plan_name = "chatgptplusplan"
-    else:
-        plan_name = "chatgptpro" if ui_mode == "hosted" else "chatgptprolite"
+    resolved_team_promo_code = ""
+    resolved_team_seat_quantity = 0
 
-    payload: dict[str, Any] = {
-        "plan_name": plan_name,
-        "checkout_ui_mode": ui_mode,
-        "entry_point": "all_plans_pricing_modal",
-    }
+    if normalized_plan == "team48":
+        plan_name = "chatgptteamplan"
+        resolved_team_promo_code = _normalize_team48_promo_code(team_promo_code)
+        resolved_team_seat_quantity = _normalize_team48_seat_quantity(team_seat_quantity)
+        payload: dict[str, Any] = {
+            "plan_name": plan_name,
+            "checkout_ui_mode": ui_mode,
+            "entry_point": "team_workspace_purchase_modal",
+            "team_plan_data": {
+                "workspace_name": TEAM48_DEFAULT_WORKSPACE_NAME,
+                "price_interval": TEAM48_DEFAULT_PRICE_INTERVAL,
+                "seat_quantity": resolved_team_seat_quantity,
+            },
+            "promo_code": resolved_team_promo_code,
+            "cancel_url": f"{CHATGPT_API_BASE}/?promoCode={resolved_team_promo_code}",
+        }
+    else:
+        if normalized_plan == "plus":
+            plan_name = "chatgptplusplan"
+        elif normalized_plan == "pro20x":
+            plan_name = "chatgptpro" if ui_mode == "hosted" else "chatgptprolite"
+        else:
+            plan_name = "chatgptprolite"
+        payload = {
+            "plan_name": plan_name,
+            "checkout_ui_mode": ui_mode,
+            "entry_point": "all_plans_pricing_modal",
+        }
     country = str(billing_country or "").strip().upper()
     currency = str(billing_currency or "").strip().upper()
     if country and currency:
@@ -895,6 +963,8 @@ def create_checkout_session(
             "processor_entity": "",
             "source": "standalone_checkout_api",
             "error": str(exc),
+            "team_promo_code": resolved_team_promo_code,
+            "team_seat_quantity": resolved_team_seat_quantity,
         }
 
     try:
@@ -909,14 +979,30 @@ def create_checkout_session(
             "processor_entity": "",
             "source": "standalone_checkout_api",
             "error": f"HTTP {resp.status_code}: {str(getattr(resp, 'text', '') or '')[:220]}",
+            "team_promo_code": resolved_team_promo_code,
+            "team_seat_quantity": resolved_team_seat_quantity,
         }
 
     session_id = str(data.get("checkout_session_id", "") or data.get("session_id", "")).strip()
     entity = str(data.get("processor_entity", "openai_llc") or "openai_llc").strip() or "openai_llc"
     raw_checkout_url = data.get("checkout_url") or data.get("url")
-    checkout_url = _normalize_checkout_url(raw_checkout_url)
-    if not checkout_url and session_id:
-        checkout_url = f"{CHATGPT_API_BASE}/checkout/{entity}/{session_id}"
+    if ui_mode == "hosted":
+        checkout_url = _normalize_openai_hosted_checkout_url(raw_checkout_url)
+        if not checkout_url:
+            return {
+                "checkout_session_id": session_id,
+                "checkout_url": "",
+                "processor_entity": entity,
+                "checkout_plan_name": plan_name,
+                "source": "standalone_checkout_api",
+                "error": "hosted_checkout_url_missing",
+                "team_promo_code": resolved_team_promo_code,
+                "team_seat_quantity": resolved_team_seat_quantity,
+            }
+    else:
+        checkout_url = _normalize_checkout_url(raw_checkout_url)
+        if not checkout_url and session_id:
+            checkout_url = f"{CHATGPT_API_BASE}/checkout/{entity}/{session_id}"
 
     return {
         "checkout_session_id": session_id,
@@ -925,6 +1011,8 @@ def create_checkout_session(
         "checkout_plan_name": plan_name,
         "source": "standalone_checkout_api",
         "error": "",
+        "team_promo_code": resolved_team_promo_code,
+        "team_seat_quantity": resolved_team_seat_quantity,
     }
 
 
@@ -1020,13 +1108,12 @@ def create_stripe_hosted_checkout_url(
     return {"stripe_checkout_url": stripe_url or fallback_url, "error": ""}
 
 
-def _pick_primary_url(link_mode: str, payment_methods: dict[str, str]) -> str:
+def _selected_payment_methods(link_mode: str, checkout_url: str) -> dict[str, str]:
     selected_mode = _normalize_link_mode(link_mode)
-    if selected_mode == "short":
-        return str(payment_methods.get("short", "") or "")
-    if selected_mode == "hosted":
-        return str(payment_methods.get("hosted", "") or payment_methods.get("stripe", "") or "")
-    return str(payment_methods.get("stripe", "") or payment_methods.get("hosted", "") or "")
+    selected_url = str(checkout_url or "").strip()
+    if not selected_url:
+        return {}
+    return {selected_mode: selected_url}
 
 
 def create_checkout_from_token(
@@ -1037,6 +1124,8 @@ def create_checkout_from_token(
     proxy: str = "",
     billing_country: str = "",
     billing_currency: str = "",
+    team_promo_code: str = "",
+    team_seat_quantity: int | None = None,
 ) -> dict[str, Any]:
     access_token = extract_access_token_from_input(token_input)
     if not access_token:
@@ -1044,6 +1133,15 @@ def create_checkout_from_token(
 
     selected_plan = _normalize_plan(plan)
     selected_mode = _normalize_link_mode(link_mode)
+    if not _is_link_mode_allowed_for_plan(selected_plan, selected_mode):
+        allowed_modes = sorted(PLAN_ALLOWED_LINK_MODES.get(selected_plan, {"short"}))
+        return {
+            "ok": False,
+            "error": f"套餐 {selected_plan} 仅支持模式: {','.join(allowed_modes)}",
+            "source": "standalone_checkout_api",
+            "selected_plan": selected_plan,
+            "link_mode": selected_mode,
+        }
 
     billing_resolved = resolve_checkout_billing_details(
         access_token=access_token,
@@ -1063,13 +1161,16 @@ def create_checkout_from_token(
     currency = str(billing_resolved.get("currency", "") or "").strip().upper()
     billing_source = str(billing_resolved.get("source", "") or "")
 
+    checkout_ui_mode = "hosted" if selected_mode == "hosted" else "custom"
     session_result = create_checkout_session(
         access_token=access_token,
         plan=selected_plan,
-        checkout_ui_mode="custom",
+        checkout_ui_mode=checkout_ui_mode,
         proxy=proxy,
         billing_country=country,
         billing_currency=currency,
+        team_promo_code=team_promo_code,
+        team_seat_quantity=team_seat_quantity,
     )
     if session_result.get("error"):
         return {
@@ -1082,6 +1183,45 @@ def create_checkout_from_token(
 
     session_id = str(session_result.get("checkout_session_id", "") or "").strip()
     processor_entity = str(session_result.get("processor_entity", "openai_llc") or "openai_llc").strip() or "openai_llc"
+    source = str(session_result.get("source", "standalone_checkout_api") or "standalone_checkout_api")
+    resolved_team_promo_code = (
+        str(session_result.get("team_promo_code", "") or "").strip() if selected_plan == "team48" else ""
+    )
+    resolved_team_seat_quantity = (
+        _normalize_team48_seat_quantity(session_result.get("team_seat_quantity"))
+        if selected_plan == "team48"
+        else 0
+    )
+
+    if selected_mode == "hosted":
+        hosted_url = str(session_result.get("checkout_url", "") or "").strip()
+        if not hosted_url:
+            return {
+                "ok": False,
+                "error": "hosted_url_missing",
+                "source": source,
+                "selected_plan": selected_plan,
+                "link_mode": selected_mode,
+            }
+        return {
+            "ok": True,
+            "checkout_url": hosted_url,
+            "checkout_short_url": "",
+            "stripe_checkout_url": "",
+            "payment_methods": _selected_payment_methods(selected_mode, hosted_url),
+            "link_mode": selected_mode,
+            "checkout_session_id": session_id,
+            "processor_entity": processor_entity,
+            "selected_plan": selected_plan,
+            "source": source,
+            "billing_country": country,
+            "billing_currency": currency,
+            "billing_source": billing_source,
+            "team_promo_code": resolved_team_promo_code,
+            "team_seat_quantity": resolved_team_seat_quantity,
+            "error": "",
+        }
+
     short_url = str(session_result.get("checkout_url", "") or "").strip()
     if (not short_url) and session_id:
         short_url = f"{CHATGPT_API_BASE}/checkout/{processor_entity}/{session_id}"
@@ -1089,20 +1229,41 @@ def create_checkout_from_token(
         return {
             "ok": False,
             "error": "short_url_missing",
-            "source": str(session_result.get("source", "standalone_checkout_api") or "standalone_checkout_api"),
-            "selected_plan": selected_plan,
-            "link_mode": selected_mode,
-        }
-    if not session_id:
-        return {
-            "ok": False,
-            "error": "checkout_session_id_missing",
-            "source": str(session_result.get("source", "standalone_checkout_api") or "standalone_checkout_api"),
+            "source": source,
             "selected_plan": selected_plan,
             "link_mode": selected_mode,
         }
 
-    if selected_plan == "pro":
+    if selected_mode == "short":
+        return {
+            "ok": True,
+            "checkout_url": short_url,
+            "checkout_short_url": short_url,
+            "stripe_checkout_url": "",
+            "payment_methods": _selected_payment_methods(selected_mode, short_url),
+            "link_mode": selected_mode,
+            "checkout_session_id": session_id,
+            "processor_entity": processor_entity,
+            "selected_plan": selected_plan,
+            "source": source,
+            "billing_country": country,
+            "billing_currency": currency,
+            "billing_source": billing_source,
+            "team_promo_code": resolved_team_promo_code,
+            "team_seat_quantity": resolved_team_seat_quantity,
+            "error": "",
+        }
+
+    if not session_id:
+        return {
+            "ok": False,
+            "error": "checkout_session_id_missing",
+            "source": source,
+            "selected_plan": selected_plan,
+            "link_mode": selected_mode,
+        }
+
+    if selected_plan == "pro20x":
         update_result = update_checkout_session_plan(
             access_token=access_token,
             checkout_session_id=session_id,
@@ -1113,7 +1274,7 @@ def create_checkout_from_token(
             return {
                 "ok": False,
                 "error": f"checkout_update_failed:{str(update_result.get('error', 'unknown'))[:220]}",
-                "source": str(session_result.get("source", "standalone_checkout_api") or "standalone_checkout_api"),
+                "source": source,
                 "selected_plan": selected_plan,
                 "link_mode": selected_mode,
             }
@@ -1128,40 +1289,47 @@ def create_checkout_from_token(
         return {
             "ok": False,
             "error": f"stripe_long_url_missing:{str(stripe_result.get('error', 'missing'))[:220]}",
-            "source": str(session_result.get("source", "standalone_checkout_api") or "standalone_checkout_api"),
+            "source": source,
             "selected_plan": selected_plan,
             "link_mode": selected_mode,
         }
 
-    hosted_url = _normalize_openai_hosted_checkout_url(stripe_url)
-    payment_methods = {
-        "short": short_url,
-        "hosted": hosted_url,
-        "stripe": stripe_url,
-    }
-    primary_url = _pick_primary_url(selected_mode, payment_methods)
-    if not primary_url:
+    if selected_mode == "hosted":
+        hosted_url = _normalize_openai_hosted_checkout_url(stripe_url) or stripe_url
         return {
-            "ok": False,
-            "error": "payment_url_missing",
-            "source": str(session_result.get("source", "standalone_checkout_api") or "standalone_checkout_api"),
-            "selected_plan": selected_plan,
+            "ok": True,
+            "checkout_url": hosted_url,
+            "checkout_short_url": short_url,
+            "stripe_checkout_url": stripe_url,
+            "payment_methods": _selected_payment_methods(selected_mode, hosted_url),
             "link_mode": selected_mode,
+            "checkout_session_id": session_id,
+            "processor_entity": processor_entity,
+            "selected_plan": selected_plan,
+            "source": source,
+            "billing_country": country,
+            "billing_currency": currency,
+            "billing_source": billing_source,
+            "team_promo_code": resolved_team_promo_code,
+            "team_seat_quantity": resolved_team_seat_quantity,
+            "error": str(stripe_result.get("error", "") or ""),
         }
 
     return {
         "ok": True,
-        "checkout_url": primary_url,
+        "checkout_url": stripe_url,
         "checkout_short_url": short_url,
         "stripe_checkout_url": stripe_url,
-        "payment_methods": payment_methods,
+        "payment_methods": _selected_payment_methods(selected_mode, stripe_url),
         "link_mode": selected_mode,
         "checkout_session_id": session_id,
         "processor_entity": processor_entity,
         "selected_plan": selected_plan,
-        "source": str(session_result.get("source", "standalone_checkout_api") or "standalone_checkout_api"),
+        "source": source,
         "billing_country": country,
         "billing_currency": currency,
         "billing_source": billing_source,
+        "team_promo_code": resolved_team_promo_code,
+        "team_seat_quantity": resolved_team_seat_quantity,
         "error": str(stripe_result.get("error", "") or ""),
     }

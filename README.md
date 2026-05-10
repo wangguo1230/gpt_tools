@@ -5,10 +5,14 @@
 ## 能力
 
 1. 输入 `token + 地区`，自动解析 Checkout 货币。
-2. 支持 `Pro / Plus`，一次生成三种支付方式：
-   - `short`（ChatGPT checkout）
-   - `hosted`（pay.openai）
-   - `stripe`（checkout.stripe）
+2. 支持 `Pro5x / Pro20x / PLUS / Team 48 个月`，按选择生成单一支付方式：
+   - `short`（ChatGPT 短链）
+   - `hosted`（站内长链，pay.openai Hosted）
+   - `long`（站外长链，checkout.stripe）
+   - 约束：`Pro5x` 仅支持 `short`，`Pro20x / PLUS / Team 48 个月` 支持三种模式
+   - `Team 48 个月` 默认使用优惠码 `THINKTECHNOLOGIESUS`，并支持前端自定义优惠码与席位数
+   - `Team 48 个月` 的地区与货币按前端选择生成，不再强制固定美国/美元
+   - `Team 48 个月` 在 `hosted` 模式下采用“短链会话转长链”方式生成（兼容性更好）
 3. 查询 `me + 订阅` 关键字段（`/backend-api/me`、`/backend-api/accounts/check`、`/backend-api/payments/customer_portal` 聚合）。
 4. 查询本工具自身订单（生成记录 + 日志）。
 
@@ -134,7 +138,7 @@ curl -X POST "http://127.0.0.1:18777/api/links/generate" \
   -H "Content-Type: application/json" \
   -d '{
     "token":"Bearer xxx",
-    "plan":"pro",
+    "plan":"pro5x",
     "link_mode":"short",
     "billing_country":"US"
   }'
@@ -149,3 +153,50 @@ curl -X POST "http://127.0.0.1:18777/api/links/generate" \
 - `GPT_TOOLS_CORS_ORIGINS`：允许跨域来源，逗号分隔
 - `VITE_API_TARGET`：前端 dev 代理目标（默认 `http://127.0.0.1:18777`）
 - `VITE_API_BASE`：前端请求前缀（可选）
+
+## GitHub 自动化构建 + Docker Compose 部署
+
+已新增：
+
+- `.github/workflows/publish-ghcr.yml`
+- `docker-compose.yml`
+- `frontend/Dockerfile`
+- `frontend/nginx.conf`
+- `backend/Dockerfile`
+
+### 自动构建行为
+
+触发条件：
+
+- `push` 到 `main`
+- 手动触发 `workflow_dispatch`
+
+执行流程：
+
+1. 自动构建并推送后端镜像到 GHCR：`ghcr.io/<owner>/<repo>/gpt-tools-backend`
+2. 自动构建并推送前端镜像到 GHCR：`ghcr.io/<owner>/<repo>/gpt-tools-frontend`
+
+说明：
+
+- 该流程不做服务器 SSH 部署，不需要配置 `DEPLOY_*` secrets
+- 发布 GHCR 使用仓库内置 `GITHUB_TOKEN`
+
+### 服务器使用 Docker Compose 部署
+
+在服务器部署目录准备 `.env`（示例）：
+
+```bash
+BACKEND_IMAGE=ghcr.io/<owner>/<repo>/gpt-tools-backend:latest
+FRONTEND_IMAGE=ghcr.io/<owner>/<repo>/gpt-tools-frontend:latest
+FRONTEND_PORT=8080
+BACKEND_PORT=18777
+GPT_TOOLS_CORS_ORIGINS=http://localhost:8080
+GPT_TOOLS_DATABASE_URL=sqlite:////app/data/gpt_tools.db
+```
+
+然后执行：
+
+```bash
+docker compose --env-file .env pull
+docker compose --env-file .env up -d --remove-orphans
+```
