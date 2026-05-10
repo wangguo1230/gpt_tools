@@ -1,6 +1,6 @@
 services:
   backend:
-    image: ${BACKEND_IMAGE:-ghcr.io/replace-me/gpt-tools-backend:latest}
+    image: ${BACKEND_IMAGE:-ghcr.io/wangguo1230/gpt_tools/gpt-tools-backend:latest}
     restart: unless-stopped
     environment:
       GPT_TOOLS_BACKEND_HOST: 0.0.0.0
@@ -14,7 +14,7 @@ services:
       - "${BACKEND_PORT:-18777}:18777"
 
   frontend:
-    image: ${FRONTEND_IMAGE:-ghcr.io/replace-me/gpt-tools-frontend:latest}
+    image: ${FRONTEND_IMAGE:-ghcr.io/wangguo1230/gpt_tools/gpt-tools-frontend:latest}
     restart: unless-stopped
     depends_on:
       - backend

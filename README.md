@@ -186,8 +186,8 @@ curl -X POST "http://127.0.0.1:18777/api/links/generate" \
 在服务器部署目录准备 `.env`（示例）：
 
 ```bash
-BACKEND_IMAGE=ghcr.io/<owner>/<repo>/gpt-tools-backend:latest
-FRONTEND_IMAGE=ghcr.io/<owner>/<repo>/gpt-tools-frontend:latest
+BACKEND_IMAGE=ghcr.io/wangguo1230/gpt_tools/gpt-tools-backend:latest
+FRONTEND_IMAGE=ghcr.io/wangguo1230/gpt_tools/gpt-tools-frontend:latest
 FRONTEND_PORT=8080
 BACKEND_PORT=18777
 GPT_TOOLS_CORS_ORIGINS=http://localhost:8080
